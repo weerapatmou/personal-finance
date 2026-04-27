@@ -1,0 +1,16 @@
+{
+  "Common": {
+    "logout": "Log out",
+    "displayCurrency": "Display currency"
+  },
+  "Login": {
+    "title": "Sign in",
+    "emailLabel": "Email",
+    "submit": "Send magic link",
+    "linkSent": "Check your email for a sign-in link.",
+    "notAllowed": "This email is not authorised to sign in."
+  },
+  "Home": {
+    "greeting": "Hello, {name}"
+  }
+}
