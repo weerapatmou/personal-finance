@@ -1,0 +1,2 @@
+ALTER TABLE "users" ADD COLUMN "use_buddhist_era" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "transactions_recurring_uniq_idx" ON "transactions" USING btree ("recurring_rule_id","date");

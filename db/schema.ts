@@ -114,6 +114,7 @@ export const users = pgTable("users", {
   baseCurrency: varchar("base_currency", { length: 3 }).notNull().default("THB"),
   displayCurrency: varchar("display_currency", { length: 3 }).notNull().default("THB"),
   locale: varchar("locale", { length: 5 }).notNull().default("th"),
+  useBuddhistEra: boolean("use_buddhist_era").notNull().default(false),
   emailVerified: timestamp("email_verified", { withTimezone: true }),
   image: text("image"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -235,33 +236,44 @@ export const recurringRules = pgTable("recurring_rules", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const transactions = pgTable("transactions", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  accountId: uuid("account_id")
-    .notNull()
-    .references(() => accounts.id, { onDelete: "restrict" }),
-  categoryId: uuid("category_id")
-    .notNull()
-    .references(() => categories.id, { onDelete: "restrict" }),
-  budgetLineId: uuid("budget_line_id").references(() => budgetLines.id, {
-    onDelete: "set null",
+export const transactions = pgTable(
+  "transactions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "restrict" }),
+    categoryId: uuid("category_id")
+      .notNull()
+      .references(() => categories.id, { onDelete: "restrict" }),
+    budgetLineId: uuid("budget_line_id").references(() => budgetLines.id, {
+      onDelete: "set null",
+    }),
+    date: date("date").notNull(),
+    amount: numeric("amount", { precision: 18, scale: 4 }).notNull(),
+    currency: varchar("currency", { length: 3 }).notNull(),
+    type: transactionTypeEnum("type").notNull().default("EXPENSE"),
+    note: text("note"),
+    recurringRuleId: uuid("recurring_rule_id").references(() => recurringRules.id, {
+      onDelete: "set null",
+    }),
+    transferGroupId: uuid("transfer_group_id"),
+    attachmentUrl: text("attachment_url"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Phase 2: prevent duplicate transactions when the recurring cron fires twice
+    // for the same occurrence (per PHASE2_PROMPT §D step 9).
+    recurringUniq: uniqueIndex("transactions_recurring_uniq_idx").on(
+      t.recurringRuleId,
+      t.date,
+    ),
   }),
-  date: date("date").notNull(),
-  amount: numeric("amount", { precision: 18, scale: 4 }).notNull(),
-  currency: varchar("currency", { length: 3 }).notNull(),
-  type: transactionTypeEnum("type").notNull().default("EXPENSE"),
-  note: text("note"),
-  recurringRuleId: uuid("recurring_rule_id").references(() => recurringRules.id, {
-    onDelete: "set null",
-  }),
-  transferGroupId: uuid("transfer_group_id"),
-  attachmentUrl: text("attachment_url"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 4. Investments (per SPEC §2.5)
