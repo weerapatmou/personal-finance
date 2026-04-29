@@ -1,0 +1,1 @@
+ALTER TABLE "budget_lines" ADD COLUMN "manual_actual" numeric(18, 4);

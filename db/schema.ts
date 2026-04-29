@@ -52,6 +52,7 @@ export const assetClassEnum = pgEnum("asset_class", [
   "CASH",
   "PF",
   "OTHER",
+  "EMERGENCY_FUND",
 ]);
 
 export const unitTypeEnum = pgEnum("unit_type", [
@@ -184,6 +185,7 @@ export const budgetLines = pgTable(
     itemNameTh: varchar("item_name_th", { length: 200 }).notNull(),
     itemNameEn: varchar("item_name_en", { length: 200 }),
     plannedAmount: numeric("planned_amount", { precision: 18, scale: 4 }).notNull(),
+    manualActual: numeric("manual_actual", { precision: 18, scale: 4 }),
     currency: varchar("currency", { length: 3 }).notNull().default("THB"),
     taxTreatmentOverride: taxTreatmentEnum("tax_treatment_override"),
     recurringTemplateId: uuid("recurring_template_id"),

@@ -17,11 +17,14 @@ import { Fragment } from "react";
 import { CopyPlanButton } from "./copy-plan-button";
 import { IncomeEditor } from "./income-editor";
 import { BudgetLineForm } from "./budget-line-form";
-import { BudgetLineDetailSection } from "./budget-line-detail-section";
+import { ActualCell } from "./actual-cell";
+import { DetailActualCell } from "./detail-modal";
 import { MonthChart } from "./month-chart";
 import type { ChartTopic } from "./month-chart";
 import { AppShell } from "@/components/app-shell";
 import { BackButton } from "@/components/back-button";
+
+const SPECIAL_CATEGORY_NAMES = ["Personal Reward", "Special Expense"] as const;
 
 export default async function MonthDetail({
   params,
@@ -59,7 +62,11 @@ export default async function MonthDetail({
           sql`EXTRACT(MONTH FROM ${transactions.date}) = ${month}`,
         ),
       ),
-    db.select().from(categories).where(eq(categories.userId, userId)),
+    // Only show active (non-archived) categories in pickers
+    db
+      .select()
+      .from(categories)
+      .where(and(eq(categories.userId, userId), eq(categories.isArchived, false))),
     db.query.monthlyIncome.findFirst({
       where: and(
         eq(monthlyIncome.userId, userId),
@@ -69,7 +76,7 @@ export default async function MonthDetail({
     }),
   ]);
 
-  // Fetch budget line details for all budget lines in this month
+  // Fetch budget line details for all lines in this month
   const blIds = bls.map((b) => b.id);
   const details =
     blIds.length > 0
@@ -84,12 +91,22 @@ export default async function MonthDetail({
           )
       : [];
 
-  // Group details by budgetLineId
-  const detailsByLineId: Record<string, typeof details> = {};
+  const detailsByLineId: Record<
+    string,
+    Array<{ id: string; name: string; amount: string; currency: string }>
+  > = {};
   for (const d of details) {
     if (!detailsByLineId[d.budgetLineId]) detailsByLineId[d.budgetLineId] = [];
-    detailsByLineId[d.budgetLineId].push(d);
+    detailsByLineId[d.budgetLineId].push({
+      id: d.id,
+      name: d.name,
+      amount: d.amount,
+      currency: d.currency,
+    });
   }
+
+  // Build category lookup
+  const catById = new Map(cats.map((c) => [c.id, c]));
 
   const result = aggregateMonth({
     budgetLines: bls.map((b) => ({
@@ -98,6 +115,7 @@ export default async function MonthDetail({
       itemNameTh: b.itemNameTh,
       itemNameEn: b.itemNameEn,
       plannedAmount: b.plannedAmount,
+      manualActual: b.manualActual,
       sortOrder: b.sortOrder,
     })),
     transactions: txs.map((t) => ({
@@ -121,16 +139,17 @@ export default async function MonthDetail({
   const net = income.minus(result.totalActual);
   const overBudgetThreshold = Number(process.env.OVER_BUDGET_THRESHOLD_PCT ?? "10");
 
-  // Build category lookup for forms (topic → categories)
+  // Lookup: budgetLineId → budget line row (for ActualCell/DetailActualCell)
+  const blById = new Map(bls.map((b) => [b.id, b]));
+
+  // Categories grouped by topic (for the add form)
   const catsByTopic: Record<Topic, typeof cats> = {
     FIX: [],
     VARIABLE: [],
     INVESTMENT: [],
     TAX: [],
   };
-  for (const c of cats) {
-    catsByTopic[c.topic as Topic].push(c);
-  }
+  for (const c of cats) catsByTopic[c.topic as Topic].push(c);
 
   // Chart data
   const chartData: ChartTopic[] = result.groups.map((g) => ({
@@ -138,26 +157,6 @@ export default async function MonthDetail({
     plan: g.plannedSubtotal.toNumber(),
     actual: g.actualSubtotal.toNumber(),
   }));
-
-  // All budget lines for the detail section
-  const allBudgetLines = bls.map((b) => ({
-    id: b.id,
-    itemNameTh: b.itemNameTh,
-    itemNameEn: b.itemNameEn,
-  }));
-
-  const detailsForSection: Record<
-    string,
-    Array<{ id: string; name: string; amount: string; currency: string }>
-  > = {};
-  for (const [lineId, lineDetails] of Object.entries(detailsByLineId)) {
-    detailsForSection[lineId] = lineDetails.map((d) => ({
-      id: d.id,
-      name: d.name,
-      amount: d.amount,
-      currency: d.currency,
-    }));
-  }
 
   return (
     <AppShell>
@@ -167,7 +166,11 @@ export default async function MonthDetail({
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <h1 className="text-2xl font-bold tracking-tight">{monthLabel(year, month)}</h1>
-              <p className={`mt-1 text-sm font-medium ${net.greaterThanOrEqualTo(0) ? "text-emerald-600" : "text-destructive"}`}>
+              <p
+                className={`mt-1 text-sm font-medium ${
+                  net.greaterThanOrEqualTo(0) ? "text-emerald-600" : "text-destructive"
+                }`}
+              >
                 Net {fmt(net)}
               </p>
             </div>
@@ -184,15 +187,24 @@ export default async function MonthDetail({
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
-                  <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Category / Item</th>
-                  <th className="px-5 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">Plan</th>
-                  <th className="px-5 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">Actual</th>
+                  <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    Category / Item
+                  </th>
+                  <th className="px-5 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    Plan
+                  </th>
+                  <th className="px-5 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    Actual
+                  </th>
                 </tr>
               </thead>
               {result.groups.map((g) => (
                 <tbody key={g.topic} className="divide-y divide-border">
                   <tr className="bg-muted/50">
-                    <td className="px-5 py-2.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground" colSpan={3}>
+                    <td
+                      className="px-5 py-2.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                      colSpan={3}
+                    >
                       {TOPIC_LABEL_EN[g.topic]}
                     </td>
                   </tr>
@@ -202,17 +214,48 @@ export default async function MonthDetail({
                         <td className="px-5 py-2 pl-8 text-xs italic text-muted-foreground">
                           {c.categoryNameEn} / {c.categoryNameTh}
                         </td>
-                        <td className="px-5 py-2 text-right text-xs text-muted-foreground">{fmt(c.plannedSubtotal)}</td>
-                        <td className="px-5 py-2 text-right text-xs text-muted-foreground">{fmt(c.actualSubtotal)}</td>
+                        <td className="px-5 py-2 text-right text-xs text-muted-foreground">
+                          {fmt(c.plannedSubtotal)}
+                        </td>
+                        <td className="px-5 py-2 text-right text-xs text-muted-foreground">
+                          {fmt(c.actualSubtotal)}
+                        </td>
                       </tr>
                       {c.lines.map((l) => {
                         const over = isOverBudget(l.planned, l.actual, overBudgetThreshold);
+                        const bl = l.budgetLineId ? blById.get(l.budgetLineId) : null;
+                        const cat = bl ? catById.get(bl.categoryId) : null;
+                        const isSpecial =
+                          cat &&
+                          (SPECIAL_CATEGORY_NAMES as readonly string[]).includes(cat.nameEn);
+
                         return (
-                          <tr key={`${c.categoryId}-${l.budgetLineId ?? "x"}-${l.itemNameTh}`} className="hover:bg-muted/30 transition-colors">
+                          <tr
+                            key={`${c.categoryId}-${l.budgetLineId ?? "x"}-${l.itemNameTh}`}
+                            className="hover:bg-muted/30 transition-colors"
+                          >
                             <td className="px-5 py-2.5 pl-12">{l.itemNameTh}</td>
-                            <td className="px-5 py-2.5 text-right font-mono">{fmt(l.planned)}</td>
-                            <td className={`px-5 py-2.5 text-right font-mono ${over ? "font-semibold text-destructive" : ""}`}>
-                              {fmt(l.actual)}
+                            <td className="px-5 py-2.5 text-right font-mono">
+                              {fmt(l.planned)}
+                            </td>
+                            <td
+                              className={`px-5 py-2.5 text-right ${
+                                over ? "font-semibold text-destructive" : ""
+                              }`}
+                            >
+                              {isSpecial && bl ? (
+                                <DetailActualCell
+                                  budgetLineId={bl.id}
+                                  categoryName={cat!.nameEn}
+                                  actual={l.actual.toString()}
+                                  initialDetails={detailsByLineId[bl.id] ?? []}
+                                />
+                              ) : (
+                                <ActualCell
+                                  budgetLineId={l.budgetLineId}
+                                  initialActual={l.actual.toString()}
+                                />
+                              )}
                             </td>
                           </tr>
                         );
@@ -226,10 +269,10 @@ export default async function MonthDetail({
                     <td className="px-5 py-2.5 text-right font-semibold">{fmt(g.plannedSubtotal)}</td>
                     <td className="px-5 py-2.5 text-right font-semibold">{fmt(g.actualSubtotal)}</td>
                   </tr>
-                  {/* Inline add-budget-line form per topic */}
                   <BudgetLineForm
                     year={year}
                     month={month}
+                    topic={g.topic}
                     categories={catsByTopic[g.topic].map((c) => ({
                       id: c.id,
                       nameTh: c.nameTh,
@@ -241,7 +284,9 @@ export default async function MonthDetail({
               ))}
               <tfoot>
                 <tr className="border-t-2 border-border bg-muted/40">
-                  <td className="px-5 py-3 text-right text-sm font-bold uppercase tracking-wider">TOTAL</td>
+                  <td className="px-5 py-3 text-right text-sm font-bold uppercase tracking-wider">
+                    TOTAL
+                  </td>
                   <td className="px-5 py-3 text-right font-bold">{fmt(result.totalPlanned)}</td>
                   <td className="px-5 py-3 text-right font-bold">{fmt(result.totalActual)}</td>
                 </tr>
@@ -249,12 +294,6 @@ export default async function MonthDetail({
             </table>
           </div>
         </div>
-
-        {/* Detail Sections */}
-        <BudgetLineDetailSection
-          budgetLines={allBudgetLines}
-          detailsByLineId={detailsForSection}
-        />
 
         {/* Plan vs Actual Chart */}
         <MonthChart data={chartData} />

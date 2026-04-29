@@ -6,34 +6,35 @@ import { eq, sql } from "drizzle-orm";
 import Link from "next/link";
 import Decimal from "decimal.js";
 import { replay } from "@/lib/cost-basis";
-import type { InvestmentTxInput, ReplayResult } from "@/lib/cost-basis";
+import type { InvestmentTxInput } from "@/lib/cost-basis";
 import { AppShell } from "@/components/app-shell";
 import { BackButton } from "@/components/back-button";
-import { Plus, AlertTriangle, TrendingUp, TrendingDown } from "lucide-react";
+import { Plus } from "lucide-react";
+import { CategoryPieChart } from "./category-pie-chart";
+import { RefreshPricesButton } from "./refresh-prices-button";
+
+// Display categories shown on the dashboard. The user thinks in these 6 buckets;
+// the underlying schema has finer-grained asset_class values that we group here.
+const DISPLAY_CATEGORIES: Array<{
+  label: string;
+  classes: string[];
+  color: string;
+}> = [
+  { label: "Stock",          classes: ["STOCK", "ETF", "FUND"],  color: "#a5b4fc" },
+  { label: "Cryptocurrency", classes: ["CRYPTO"],                color: "#16a34a" },
+  { label: "Gold",           classes: ["GOLD"],                  color: "#fde68a" },
+  { label: "Provident Fund", classes: ["PF"],                    color: "#7dd3fc" },
+  { label: "Cash",           classes: ["CASH", "OTHER"],         color: "#fcd34d" },
+  { label: "Emergency Fund", classes: ["EMERGENCY_FUND"],        color: "#fca5a5" },
+];
 
 export default async function PortfolioDashboard() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
   const userId = session.user.id;
 
-  const [latestRows, allHoldings, allTxs] = await Promise.all([
-    db.execute<{
-      holding_id: string;
-      date: string;
-      units_held: string;
-      price_native: string;
-      price_currency: string;
-      value_base: string;
-      is_stale: boolean;
-    }>(sql`
-      SELECT DISTINCT ON (holding_id)
-        holding_id, date, units_held, price_native, price_currency, value_base, is_stale
-      FROM portfolio_daily
-      WHERE user_id = ${userId}
-      ORDER BY holding_id, date DESC
-    `),
+  const [allHoldings, allTxs, latestPrices, fxResult] = await Promise.all([
     db.select().from(holdings).where(eq(holdings.userId, userId)),
-    // Only fetch the columns that replay() needs — skips id, note, createdAt, etc.
     db
       .select({
         holdingId: investmentTxs.holdingId,
@@ -46,7 +47,31 @@ export default async function PortfolioDashboard() {
       })
       .from(investmentTxs)
       .where(eq(investmentTxs.userId, userId)),
+    db.execute<{ symbol: string; close: string; date: string }>(sql`
+      SELECT DISTINCT ON (symbol) symbol, close::text AS close, date::text AS date
+      FROM price_cache
+      ORDER BY symbol, date DESC
+    `),
+    db.execute<{ rate: string; date: string }>(sql`
+      SELECT rate::text AS rate, date::text AS date
+      FROM fx_rates
+      WHERE base = 'USD' AND quote = 'THB'
+      ORDER BY date DESC
+      LIMIT 1
+    `),
   ]);
+
+  const fxRows = Array.from(fxResult as unknown as Iterable<{ rate: string; date: string }>);
+  const usdToThb = new Decimal(fxRows[0]?.rate ?? "35");
+  const fxAsOf = fxRows[0]?.date ?? null;
+
+  const priceRows = Array.from(
+    latestPrices as unknown as Iterable<{ symbol: string; close: string; date: string }>,
+  );
+  const priceMap = new Map<string, { close: Decimal; date: string }>();
+  for (const p of priceRows) {
+    priceMap.set(p.symbol, { close: new Decimal(p.close), date: p.date });
+  }
 
   const txByHolding = new Map<string, InvestmentTxInput[]>();
   for (const t of allTxs) {
@@ -67,185 +92,195 @@ export default async function PortfolioDashboard() {
     name: string;
     assetClass: string;
     nativeCurrency: string;
+    symbol: string | null;
     units: Decimal;
     avgCost: Decimal;
-    currentPrice: Decimal;
-    valueBase: Decimal;
-    pnlPct: Decimal | null;
-    isStale: boolean;
+    price: Decimal;
+    priceDate: string | null;
+    valueNative: Decimal;
+    valueThb: Decimal;
   };
 
-  const rowsArr = Array.from(latestRows as unknown as Iterable<{
-    holding_id: string;
-    date: string;
-    units_held: string;
-    price_native: string;
-    price_currency: string;
-    value_base: string;
-    is_stale: boolean;
-  }>);
-
-  const dashboardRows: Row[] = allHoldings.map((h) => {
-    const dailyRow = rowsArr.find((r) => r.holding_id === h.id);
-    const txs = txByHolding.get(h.id) ?? [];
-    const cb: ReplayResult = replay(txs);
-    const currentPrice = dailyRow ? new Decimal(dailyRow.price_native) : new Decimal(0);
-    const valueBase = dailyRow ? new Decimal(dailyRow.value_base) : new Decimal(0);
-    const pnlPct = cb.avgCost.isZero()
-      ? null
-      : currentPrice.minus(cb.avgCost).dividedBy(cb.avgCost).times(100);
+  const rows: Row[] = allHoldings.map((h) => {
+    const cb = replay(txByHolding.get(h.id) ?? []);
+    const isManual = h.quoteSource === "NONE";
+    const priceEntry = h.symbol ? priceMap.get(h.symbol) : undefined;
+    const price = isManual ? new Decimal(1) : (priceEntry?.close ?? new Decimal(0));
+    const valueNative = cb.units.times(price);
+    const valueThb =
+      h.nativeCurrency === "USD" ? valueNative.times(usdToThb) : valueNative;
     return {
       id: h.id,
       name: h.name,
       assetClass: h.assetClass,
       nativeCurrency: h.nativeCurrency,
+      symbol: h.symbol,
       units: cb.units,
       avgCost: cb.avgCost,
-      currentPrice,
-      valueBase,
-      pnlPct,
-      isStale: dailyRow?.is_stale ?? true,
+      price,
+      priceDate: priceEntry?.date ?? null,
+      valueNative,
+      valueThb,
     };
   });
 
-  const totalNetWorth = dashboardRows.reduce((s, r) => s.plus(r.valueBase), new Decimal(0));
+  const totalThb = rows.reduce((s, r) => s.plus(r.valueThb), new Decimal(0));
 
-  const allocationByClass = new Map<string, Decimal>();
-  for (const r of dashboardRows) {
-    const cur = allocationByClass.get(r.assetClass) ?? new Decimal(0);
-    allocationByClass.set(r.assetClass, cur.plus(r.valueBase));
-  }
-  const allocation = Array.from(allocationByClass.entries())
-    .map(([cls, val]) => ({
-      cls,
-      val,
-      pct: totalNetWorth.isZero() ? new Decimal(0) : val.dividedBy(totalNetWorth).times(100),
-    }))
-    .sort((a, b) => (a.val.greaterThan(b.val) ? -1 : 1));
+  const categoryRows = DISPLAY_CATEGORIES.map((c) => {
+    const total = rows
+      .filter((r) => c.classes.includes(r.assetClass))
+      .reduce((s, r) => s.plus(r.valueThb), new Decimal(0));
+    const pct = totalThb.isZero() ? new Decimal(0) : total.dividedBy(totalThb).times(100);
+    return { label: c.label, color: c.color, total, pct };
+  });
 
-  const staleHoldings = dashboardRows.filter((r) => r.isStale);
+  const pieData = categoryRows.map((c) => ({
+    name: c.label,
+    value: c.total.toNumber(),
+    color: c.color,
+  }));
 
   return (
     <AppShell>
-      <div className="p-6 sm:p-8 max-w-6xl mx-auto space-y-6">
-        {/* Header */}
+      <div className="mx-auto max-w-6xl space-y-6 p-6 sm:p-8">
         <div className="pt-8 lg:pt-0 space-y-4">
           <BackButton href="/" label="Dashboard" />
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h1 className="text-2xl font-bold tracking-tight">Portfolio</h1>
-              <p className="text-sm text-muted-foreground mt-0.5">Net worth, holdings & allocation</p>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Net worth, allocation & current prices
+              </p>
             </div>
-            <Link
-              href="/portfolio/holdings/new"
-              className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-90 transition-opacity"
-            >
-              <Plus className="h-4 w-4" />
-              Add holding
-            </Link>
+            <div className="flex items-center gap-3">
+              <RefreshPricesButton />
+              <Link
+                href="/portfolio/holdings/new"
+                className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
+              >
+                <Plus className="h-4 w-4" />
+                Add holding
+              </Link>
+            </div>
           </div>
         </div>
 
-        {staleHoldings.length > 0 && (
-          <div className="flex items-start gap-3 rounded-2xl border border-amber-400/40 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-            <div>
-              <span className="font-semibold">Stale data: </span>
-              {staleHoldings.map((r) => r.name).join(", ")}
-            </div>
-          </div>
-        )}
-
-        {/* Stat cards */}
+        {/* Top stat cards */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Net Worth</p>
-            <p className="mt-2 text-2xl font-bold">{fmt(totalNetWorth)}</p>
+          <StatCard
+            label="Total Asset"
+            value={fmtTHB(totalThb)}
+            sub={`${rows.length} holding${rows.length === 1 ? "" : "s"}`}
+            highlight
+          />
+          <StatCard
+            label="USD / THB"
+            value={usdToThb.toFixed(4)}
+            sub={fxAsOf ? `as of ${fxAsOf}` : "no FX data — refresh prices"}
+          />
+          <StatCard
+            label="Categories"
+            value={String(categoryRows.filter((c) => !c.total.isZero()).length)}
+            sub="active asset types"
+          />
+        </div>
+
+        {/* Allocation: table + pie chart */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+          <div className="lg:col-span-3 rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+            <div className="border-b border-border px-5 py-4">
+              <h2 className="text-sm font-semibold">Allocation by category</h2>
+            </div>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/30 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  <th className="px-5 py-2.5 text-left">Category</th>
+                  <th className="px-5 py-2.5 text-right">Value (THB)</th>
+                  <th className="px-5 py-2.5 text-right">%</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {categoryRows.map((c) => (
+                  <tr key={c.label}>
+                    <td className="px-5 py-3">
+                      <span className="inline-flex items-center gap-2">
+                        <span className="h-2.5 w-2.5 rounded-full" style={{ background: c.color }} />
+                        <span className="font-medium">{c.label}</span>
+                      </span>
+                    </td>
+                    <td className="px-5 py-3 text-right font-mono">{fmtTHB(c.total)}</td>
+                    <td className="px-5 py-3 text-right text-muted-foreground">{c.pct.toFixed(2)}%</td>
+                  </tr>
+                ))}
+                <tr className="bg-muted/30 font-semibold">
+                  <td className="px-5 py-3">Total</td>
+                  <td className="px-5 py-3 text-right font-mono">{fmtTHB(totalThb)}</td>
+                  <td className="px-5 py-3 text-right text-muted-foreground">100.00%</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Holdings</p>
-            <p className="mt-2 text-2xl font-bold">{dashboardRows.length}</p>
-          </div>
-          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Stale Prices</p>
-            <p className={`mt-2 text-2xl font-bold ${staleHoldings.length > 0 ? "text-amber-600" : "text-emerald-600"}`}>
-              {staleHoldings.length}
-            </p>
+
+          <div className="lg:col-span-2 rounded-2xl border border-border bg-card p-5 shadow-sm">
+            <h2 className="mb-2 text-sm font-semibold">Distribution</h2>
+            <CategoryPieChart data={pieData} />
           </div>
         </div>
 
-        {/* Allocation */}
-        {allocation.length > 0 && (
-          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-            <h2 className="mb-4 text-sm font-semibold">Allocation</h2>
-            <div className="space-y-3">
-              {allocation.map((a) => (
-                <div key={a.cls}>
-                  <div className="mb-1 flex items-center justify-between text-sm">
-                    <span className="font-medium">{a.cls}</span>
-                    <span className="text-muted-foreground">{fmt(a.val)} · {a.pct.toFixed(1)}%</span>
-                  </div>
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-primary"
-                      style={{ width: `${a.pct.toNumber()}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Holdings table */}
+        {/* Holdings detail */}
         <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
-          <div className="px-5 py-4 border-b border-border">
+          <div className="border-b border-border px-5 py-4">
             <h2 className="text-sm font-semibold">Holdings</h2>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border bg-muted/30">
-                  <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Name</th>
-                  <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Asset</th>
-                  <th className="px-5 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">Units</th>
-                  <th className="px-5 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">Avg Cost</th>
-                  <th className="px-5 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">Price</th>
-                  <th className="px-5 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">Value (THB)</th>
-                  <th className="px-5 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">P&amp;L %</th>
+                <tr className="border-b border-border bg-muted/30 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  <th className="px-5 py-3 text-left">Name</th>
+                  <th className="px-5 py-3 text-left">Type</th>
+                  <th className="px-5 py-3 text-right">Units</th>
+                  <th className="px-5 py-3 text-right">Price</th>
+                  <th className="px-5 py-3 text-right">Native value</th>
+                  <th className="px-5 py-3 text-right">Value (THB)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {dashboardRows.map((r) => {
-                  const isUp = r.pnlPct?.greaterThanOrEqualTo(0);
-                  return (
+                {rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-5 py-12 text-center text-muted-foreground">
+                      No holdings yet. Click <span className="font-medium">Add holding</span> to start.
+                    </td>
+                  </tr>
+                ) : (
+                  rows.map((r) => (
                     <tr key={r.id} className="hover:bg-muted/30 transition-colors">
-                      <td className="px-5 py-3.5">
+                      <td className="px-5 py-3">
                         <Link
                           href={`/portfolio/holdings/${r.id}`}
                           className="font-medium text-primary hover:underline"
                         >
                           {r.name}
                         </Link>
-                      </td>
-                      <td className="px-5 py-3.5 text-muted-foreground">{r.assetClass}</td>
-                      <td className="px-5 py-3.5 text-right font-mono text-sm">{r.units.toFixed(4)}</td>
-                      <td className="px-5 py-3.5 text-right font-mono text-sm">{r.avgCost.toFixed(4)}</td>
-                      <td className="px-5 py-3.5 text-right font-mono text-sm">{r.currentPrice.toFixed(4)}</td>
-                      <td className="px-5 py-3.5 text-right font-mono text-sm">{fmt(r.valueBase)}</td>
-                      <td className="px-5 py-3.5 text-right">
-                        {r.pnlPct ? (
-                          <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-semibold ${isUp ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>
-                            {isUp ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                            {r.pnlPct.toFixed(2)}%
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
+                        {r.symbol && (
+                          <span className="ml-2 text-xs text-muted-foreground">{r.symbol}</span>
                         )}
                       </td>
+                      <td className="px-5 py-3 text-muted-foreground">{r.assetClass}</td>
+                      <td className="px-5 py-3 text-right font-mono">{r.units.toFixed(4)}</td>
+                      <td className="px-5 py-3 text-right font-mono">
+                        {r.price.isZero() ? "—" : r.price.toFixed(2)}
+                        {!r.price.isZero() && (
+                          <span className="ml-1 text-xs text-muted-foreground">{r.nativeCurrency}</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-3 text-right font-mono">
+                        {r.valueNative.toFixed(2)}
+                        <span className="ml-1 text-xs text-muted-foreground">{r.nativeCurrency}</span>
+                      </td>
+                      <td className="px-5 py-3 text-right font-mono font-semibold">{fmtTHB(r.valueThb)}</td>
                     </tr>
-                  );
-                })}
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -255,10 +290,34 @@ export default async function PortfolioDashboard() {
   );
 }
 
-function fmt(d: Decimal): string {
+function StatCard({
+  label,
+  value,
+  sub,
+  highlight,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  highlight?: boolean;
+}) {
+  return (
+    <div
+      className={`rounded-2xl border p-5 shadow-sm ${highlight ? "border-primary/30 bg-primary/5" : "border-border bg-card"}`}
+    >
+      <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="mt-2 text-2xl font-bold tracking-tight">{value}</p>
+      {sub && <p className="mt-1 text-xs text-muted-foreground">{sub}</p>}
+    </div>
+  );
+}
+
+function fmtTHB(d: Decimal): string {
   return new Intl.NumberFormat("th-TH", {
     style: "currency",
     currency: "THB",
     minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(d.toNumber());
 }
+

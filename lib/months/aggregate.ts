@@ -8,6 +8,7 @@ export type AggregateInput = {
     itemNameTh: string;
     itemNameEn: string | null;
     plannedAmount: string | number | Decimal;
+    manualActual?: string | number | Decimal | null;
     sortOrder: number;
   }>;
   transactions: Array<{
@@ -88,7 +89,10 @@ export function aggregateMonth(input: AggregateInput): AggregateResult {
     const cat = catById.get(bl.categoryId);
     if (!cat) continue;
     const planned = new Decimal(bl.plannedAmount);
-    const actual = txByLine.get(`${bl.categoryId}::${bl.id}`) ?? ZERO;
+    const actual =
+      bl.manualActual != null
+        ? new Decimal(bl.manualActual)
+        : (txByLine.get(`${bl.categoryId}::${bl.id}`) ?? ZERO);
     const bucket = bucketByCat.get(cat.id) ?? { categoryId: cat.id, lines: [] };
     bucket.lines.push({
       budgetLineId: bl.id,

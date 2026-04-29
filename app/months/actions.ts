@@ -8,7 +8,7 @@ import {
   monthlyIncome,
   categories,
 } from "@/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, sql, sum } from "drizzle-orm";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
@@ -23,6 +23,33 @@ const decimalString = z
   .string()
   .min(1)
   .regex(/^-?\d+(\.\d+)?$/, "Must be a numeric string");
+
+// ─── Category CRUD ───────────────────────────────────────────────────────────
+
+const categoryInput = z.object({
+  topic: z.enum(["FIX", "VARIABLE", "INVESTMENT", "TAX"]),
+  nameEn: z.string().min(1).max(200),
+  nameTh: z.string().min(1).max(200),
+});
+
+export async function createCategory(input: unknown): Promise<string> {
+  const userId = await requireUserId();
+  const data = categoryInput.parse(input);
+
+  const [result] = await db
+    .insert(categories)
+    .values({
+      userId,
+      topic: data.topic,
+      nameEn: data.nameEn,
+      nameTh: data.nameTh,
+    })
+    .returning({ id: categories.id });
+
+  if (!result) throw new Error("Failed to create category");
+  revalidatePath("/months", "layout");
+  return result.id;
+}
 
 // ─── BudgetLine CRUD ─────────────────────────────────────────────────────────
 
@@ -206,7 +233,9 @@ const budgetLineDetailInput = z.object({
   currency: z.enum(["THB", "USD"]).default("THB"),
 });
 
-export async function createBudgetLineDetail(input: unknown) {
+export async function createBudgetLineDetail(
+  input: unknown,
+): Promise<{ id: string; name: string; amount: string; currency: string }> {
   const userId = await requireUserId();
   const data = budgetLineDetailInput.parse(input);
 
@@ -215,15 +244,14 @@ export async function createBudgetLineDetail(input: unknown) {
   });
   if (!bl) throw new Error("Budget line not found");
 
-  await db.insert(budgetLineDetails).values({
-    userId,
-    budgetLineId: data.budgetLineId,
-    name: data.name,
-    amount: data.amount,
-    currency: data.currency,
-  });
+  const [created] = await db
+    .insert(budgetLineDetails)
+    .values({ userId, budgetLineId: data.budgetLineId, name: data.name, amount: data.amount, currency: data.currency })
+    .returning();
+  if (!created) throw new Error("Insert failed");
 
-  revalidatePath(`/months/${pad(bl.year)}-${pad2(bl.month)}`);
+  await syncDetailTotal(data.budgetLineId, bl.year, bl.month);
+  return { id: created.id, name: created.name, amount: created.amount, currency: created.currency };
 }
 
 export async function deleteBudgetLineDetail(id: string) {
@@ -239,7 +267,89 @@ export async function deleteBudgetLineDetail(id: string) {
   const bl = await db.query.budgetLines.findFirst({
     where: eq(budgetLines.id, existing.budgetLineId),
   });
-  if (bl) revalidatePath(`/months/${pad(bl.year)}-${pad2(bl.month)}`);
+  if (bl) await syncDetailTotal(existing.budgetLineId, bl.year, bl.month);
+}
+
+const updateDetailInput = z.object({
+  name: z.string().min(1).max(500),
+  amount: decimalString,
+});
+
+export async function updateBudgetLineDetail(id: string, input: unknown) {
+  const userId = await requireUserId();
+  const data = updateDetailInput.parse(input);
+
+  const existing = await db.query.budgetLineDetails.findFirst({
+    where: and(eq(budgetLineDetails.id, id), eq(budgetLineDetails.userId, userId)),
+  });
+  if (!existing) throw new Error("Detail not found");
+
+  await db
+    .update(budgetLineDetails)
+    .set({ name: data.name, amount: data.amount, updatedAt: new Date() })
+    .where(eq(budgetLineDetails.id, id));
+
+  const bl = await db.query.budgetLines.findFirst({
+    where: eq(budgetLines.id, existing.budgetLineId),
+  });
+  if (bl) await syncDetailTotal(existing.budgetLineId, bl.year, bl.month);
+}
+
+// ─── BudgetLine actual override ───────────────────────────────────────────────
+
+export async function updateBudgetLineActual(id: string, amount: string | null) {
+  const userId = await requireUserId();
+
+  const existing = await db.query.budgetLines.findFirst({
+    where: and(eq(budgetLines.id, id), eq(budgetLines.userId, userId)),
+  });
+  if (!existing) throw new Error("Budget line not found");
+
+  const parsed = amount !== null ? z.string().regex(/^-?\d+(\.\d+)?$/).parse(amount) : null;
+
+  await db
+    .update(budgetLines)
+    .set({ manualActual: parsed, updatedAt: new Date() })
+    .where(eq(budgetLines.id, id));
+
+  revalidatePath(`/months/${pad(existing.year)}-${pad2(existing.month)}`);
+}
+
+// ─── Category archive (soft-delete) ──────────────────────────────────────────
+
+const PROTECTED_CATEGORY_NAMES = ["Personal Reward", "Special Expense"] as const;
+
+export async function archiveCategory(id: string) {
+  const userId = await requireUserId();
+
+  const cat = await db.query.categories.findFirst({
+    where: and(eq(categories.id, id), eq(categories.userId, userId)),
+  });
+  if (!cat) throw new Error("Category not found");
+
+  if ((PROTECTED_CATEGORY_NAMES as readonly string[]).includes(cat.nameEn)) {
+    throw new Error("This category is required and cannot be removed");
+  }
+
+  await db.update(categories).set({ isArchived: true, updatedAt: new Date() }).where(eq(categories.id, id));
+  revalidatePath("/months", "layout");
+}
+
+// ─── Private helper ───────────────────────────────────────────────────────────
+
+async function syncDetailTotal(budgetLineId: string, year: number, month: number) {
+  const [row] = await db
+    .select({ total: sum(budgetLineDetails.amount) })
+    .from(budgetLineDetails)
+    .where(eq(budgetLineDetails.budgetLineId, budgetLineId));
+
+  const newTotal = row?.total ?? "0";
+  await db
+    .update(budgetLines)
+    .set({ manualActual: newTotal === "0" ? null : newTotal, updatedAt: new Date() })
+    .where(eq(budgetLines.id, budgetLineId));
+
+  revalidatePath(`/months/${pad(year)}-${pad2(month)}`);
 }
 
 // ─── Month creation + copy from previous ─────────────────────────────────────
