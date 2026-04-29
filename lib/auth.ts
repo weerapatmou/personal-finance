@@ -1,42 +1,78 @@
-import NextAuth from "next-auth";
-import { DrizzleAdapter } from "@auth/drizzle-adapter";
-import Nodemailer from "next-auth/providers/nodemailer";
+import NextAuth, { type DefaultSession } from "next-auth";
+import Credentials from "next-auth/providers/credentials";
+import bcrypt from "bcryptjs";
+import { z } from "zod";
 import { db } from "@/db";
-import {
-  users,
-  authAccounts,
-  sessions,
-  verificationTokens,
-} from "@/db/schema";
+import { users } from "@/db/schema";
+import { eq } from "drizzle-orm";
 
-const allowedEmail = process.env.ALLOWED_EMAIL?.toLowerCase().trim();
+declare module "next-auth" {
+  interface Session {
+    user: {
+      id: string;
+      username: string;
+    } & DefaultSession["user"];
+  }
+  interface User {
+    id?: string;
+    username?: string;
+  }
+}
+
+// JWT shape augmentation: in Auth.js v5 the JWT type lives on the same
+// next-auth module surface; we cast in callbacks rather than augment a
+// non-existent submodule.
+
+const credentialsSchema = z.object({
+  username: z.string().min(1).max(64),
+  password: z.string().min(1).max(256),
+});
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
-  adapter: DrizzleAdapter(db, {
-    usersTable: users,
-    accountsTable: authAccounts,
-    sessionsTable: sessions,
-    verificationTokensTable: verificationTokens,
-  }),
-  session: { strategy: "database" },
+  // No adapter — Credentials uses JWT sessions only.
+  session: { strategy: "jwt" },
   pages: { signIn: "/login" },
   providers: [
-    Nodemailer({
-      server: process.env.EMAIL_SERVER!,
-      from: process.env.EMAIL_FROM!,
+    Credentials({
+      name: "credentials",
+      credentials: {
+        username: { label: "Username", type: "text" },
+        password: { label: "Password", type: "password" },
+      },
+      async authorize(rawCredentials) {
+        const parsed = credentialsSchema.safeParse(rawCredentials);
+        if (!parsed.success) return null;
+        const { username, password } = parsed.data;
+
+        const user = await db.query.users.findFirst({
+          where: eq(users.username, username),
+        });
+        if (!user) return null;
+
+        const ok = await bcrypt.compare(password, user.passwordHash);
+        if (!ok) return null;
+
+        return {
+          id: user.id,
+          username: user.username,
+          name: user.name,
+          email: user.email ?? undefined,
+        };
+      },
     }),
   ],
   callbacks: {
-    async signIn({ user, email }) {
-      // Reject any non-allowlisted email at the signIn callback (per SPEC §9).
-      const candidate = (user.email ?? email?.verificationRequest ? user.email : null)?.toLowerCase().trim();
-      if (!allowedEmail) return false;
-      if (!candidate) return false;
-      return candidate === allowedEmail;
+    async jwt({ token, user }) {
+      if (user) {
+        token.id = (user as { id?: string }).id ?? token.id;
+        token.username = (user as { username?: string }).username ?? token.username;
+      }
+      return token;
     },
-    async session({ session, user }) {
-      if (session.user && user?.id) {
-        session.user.id = user.id;
+    async session({ session, token }) {
+      if (session.user) {
+        session.user.id = (token.id ?? "") as string;
+        session.user.username = (token.username ?? "") as string;
       }
       return session;
     },

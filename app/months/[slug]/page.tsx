@@ -12,6 +12,7 @@ import Decimal from "decimal.js";
 import { aggregateMonth, isOverBudget } from "@/lib/months/aggregate";
 import { TOPIC_LABEL_EN } from "@/lib/types";
 import type { Topic } from "@/lib/types";
+import { Fragment } from "react";
 import { CopyPlanButton } from "./copy-plan-button";
 import { IncomeEditor } from "./income-editor";
 
@@ -113,50 +114,56 @@ export default async function MonthDetail({
               <th className="py-2 pr-4 text-right">Actual</th>
             </tr>
           </thead>
-          <tbody>
-            {result.groups.map((g) => (
-              <tbody key={g.topic}>
-                <tr className="bg-muted/50">
-                  <td className="py-2 pl-2 font-semibold uppercase tracking-wide" colSpan={3}>
-                    {TOPIC_LABEL_EN[g.topic]}
-                  </td>
-                </tr>
-                {g.categories.map((c) => (
-                  <>
-                    <tr key={`${c.categoryId}-head`} className="text-muted-foreground">
-                      <td className="py-1 pl-4 italic">{c.categoryNameEn} / {c.categoryNameTh}</td>
-                      <td className="py-1 pr-4 text-right">{fmt(c.plannedSubtotal)}</td>
-                      <td className="py-1 pr-4 text-right">{fmt(c.actualSubtotal)}</td>
-                    </tr>
-                    {c.lines.map((l) => {
-                      const over = isOverBudget(l.planned, l.actual, overBudgetThreshold);
-                      return (
-                        <tr key={`${c.categoryId}-${l.budgetLineId ?? "x"}-${l.itemNameTh}`} className="border-b">
-                          <td className="py-1 pl-8">{l.itemNameTh}</td>
-                          <td className="py-1 pr-4 text-right">{fmt(l.planned)}</td>
-                          <td
-                            className={`py-1 pr-4 text-right ${over ? "text-destructive" : ""}`}
-                          >
-                            {fmt(l.actual)}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </>
-                ))}
-                <tr className="border-b font-semibold">
-                  <td className="py-2 pl-2 text-right">Subtotal {TOPIC_LABEL_EN[g.topic]}</td>
-                  <td className="py-2 pr-4 text-right">{fmt(g.plannedSubtotal)}</td>
-                  <td className="py-2 pr-4 text-right">{fmt(g.actualSubtotal)}</td>
-                </tr>
-              </tbody>
-            ))}
+          {/* One <tbody> per topic group is valid HTML and avoids hydration errors. */}
+          {result.groups.map((g) => (
+            <tbody key={g.topic}>
+              <tr className="bg-muted/50">
+                <td className="py-2 pl-2 font-semibold uppercase tracking-wide" colSpan={3}>
+                  {TOPIC_LABEL_EN[g.topic]}
+                </td>
+              </tr>
+              {g.categories.map((c) => (
+                <Fragment key={c.categoryId}>
+                  <tr className="text-muted-foreground">
+                    <td className="py-1 pl-4 italic">
+                      {c.categoryNameEn} / {c.categoryNameTh}
+                    </td>
+                    <td className="py-1 pr-4 text-right">{fmt(c.plannedSubtotal)}</td>
+                    <td className="py-1 pr-4 text-right">{fmt(c.actualSubtotal)}</td>
+                  </tr>
+                  {c.lines.map((l) => {
+                    const over = isOverBudget(l.planned, l.actual, overBudgetThreshold);
+                    return (
+                      <tr
+                        key={`${c.categoryId}-${l.budgetLineId ?? "x"}-${l.itemNameTh}`}
+                        className="border-b"
+                      >
+                        <td className="py-1 pl-8">{l.itemNameTh}</td>
+                        <td className="py-1 pr-4 text-right">{fmt(l.planned)}</td>
+                        <td
+                          className={`py-1 pr-4 text-right ${over ? "text-destructive" : ""}`}
+                        >
+                          {fmt(l.actual)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </Fragment>
+              ))}
+              <tr className="border-b font-semibold">
+                <td className="py-2 pl-2 text-right">Subtotal {TOPIC_LABEL_EN[g.topic]}</td>
+                <td className="py-2 pr-4 text-right">{fmt(g.plannedSubtotal)}</td>
+                <td className="py-2 pr-4 text-right">{fmt(g.actualSubtotal)}</td>
+              </tr>
+            </tbody>
+          ))}
+          <tfoot>
             <tr className="font-semibold">
               <td className="py-2 pl-2 text-right">TOTAL</td>
               <td className="py-2 pr-4 text-right">{fmt(result.totalPlanned)}</td>
               <td className="py-2 pr-4 text-right">{fmt(result.totalActual)}</td>
             </tr>
-          </tbody>
+          </tfoot>
         </table>
       </div>
 

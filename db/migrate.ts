@@ -1,4 +1,7 @@
-import "dotenv/config";
+import { config } from "dotenv";
+// Load .env.local first (Next.js convention), then fall back to .env.
+config({ path: ".env.local" });
+config();
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";

@@ -109,7 +109,9 @@ export const backupStatusEnum = pgEnum("backup_status", [
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
-  email: varchar("email", { length: 320 }).notNull().unique(),
+  username: varchar("username", { length: 64 }).notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  email: varchar("email", { length: 320 }).unique(),
   name: varchar("name", { length: 200 }).notNull(),
   baseCurrency: varchar("base_currency", { length: 3 }).notNull().default("THB"),
   displayCurrency: varchar("display_currency", { length: 3 }).notNull().default("THB"),

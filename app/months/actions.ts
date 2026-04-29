@@ -217,14 +217,19 @@ export async function createMonth(input: unknown) {
   });
 
   if (existingLines.length === 0 && data.copyPlanFromPrevious) {
-    await copyPlanFromPreviousMonth(data.year, data.month);
+    // Silent if there's no previous month to copy from — typical first-run case.
+    await copyPlanFromPreviousMonth(data.year, data.month, { silentIfEmpty: true });
   }
 
   revalidatePath(`/months/${pad(data.year)}-${pad2(data.month)}`);
   revalidatePath("/months");
 }
 
-export async function copyPlanFromPreviousMonth(year: number, month: number) {
+export async function copyPlanFromPreviousMonth(
+  year: number,
+  month: number,
+  options: { silentIfEmpty?: boolean } = {},
+) {
   const userId = await requireUserId();
   const prev = previousMonth(year, month);
 
@@ -237,6 +242,9 @@ export async function copyPlanFromPreviousMonth(year: number, month: number) {
   });
 
   if (prevLines.length === 0) {
+    if (options.silentIfEmpty) {
+      return { copied: 0, skipped: 0, prevMonthEmpty: true } as const;
+    }
     throw new Error(
       `No BudgetLines exist for ${prev.year}-${pad2(prev.month)} to copy from.`,
     );

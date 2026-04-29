@@ -1,7 +1,11 @@
-import "dotenv/config";
+import { config } from "dotenv";
+config({ path: ".env.local" });
+config();
+
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { eq, and } from "drizzle-orm";
+import bcrypt from "bcryptjs";
 import * as schema from "./schema";
 
 const url = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
@@ -10,27 +14,45 @@ if (!url) {
   process.exit(1);
 }
 
-const seedEmail = process.env.SEED_EMAIL ?? process.env.ALLOWED_EMAIL;
-const seedName = process.env.SEED_NAME ?? "Owner";
-if (!seedEmail) {
-  console.error("Set SEED_EMAIL (or ALLOWED_EMAIL) before seeding.");
-  process.exit(1);
-}
+// Defaults match the auth credentials documented in PHASE prompts.
+const seedUsername = process.env.SEED_USERNAME ?? "weerapat";
+const seedPassword = process.env.SEED_PASSWORD ?? "weerapatmou";
+const seedName = process.env.SEED_NAME ?? "Weerapat";
 
 const sql = postgres(url, { max: 1 });
 const db = drizzle(sql, { schema });
 
 // ─── User ────────────────────────────────────────────────────────────────────
-const existingUser = await db.query.users.findFirst({ where: eq(schema.users.email, seedEmail) });
-const user =
-  existingUser ??
-  (
-    await db
-      .insert(schema.users)
-      .values({ email: seedEmail, name: seedName })
-      .returning()
-  )[0];
-console.log(`✔ user: ${user.email} (${user.id})`);
+const existingUser = await db.query.users.findFirst({
+  where: eq(schema.users.username, seedUsername),
+});
+
+let user: typeof schema.users.$inferSelect;
+if (existingUser) {
+  // Re-hash and update the password so the seed remains the source of truth
+  // for development credentials. Idempotent: same plaintext yields the same
+  // *cost*, but bcrypt salts mean the stored hash will differ on each run —
+  // which is fine, login still works.
+  const newHash = await bcrypt.hash(seedPassword, 10);
+  const [updated] = await db
+    .update(schema.users)
+    .set({ passwordHash: newHash, name: seedName, updatedAt: new Date() })
+    .where(eq(schema.users.id, existingUser.id))
+    .returning();
+  user = updated!;
+} else {
+  const hash = await bcrypt.hash(seedPassword, 10);
+  const [created] = await db
+    .insert(schema.users)
+    .values({
+      username: seedUsername,
+      passwordHash: hash,
+      name: seedName,
+    })
+    .returning();
+  user = created!;
+}
+console.log(`✔ user: ${user.username} (${user.id})`);
 
 // ─── Accounts ────────────────────────────────────────────────────────────────
 type SeedAccount = {
@@ -152,3 +174,4 @@ console.log("✔ category aliases (Neslte → Nestle)");
 
 await sql.end();
 console.log("\nSeed complete.");
+console.log(`Login with username "${seedUsername}" / password "${seedPassword}".`);
