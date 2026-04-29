@@ -42,7 +42,7 @@ export default async function RetirementPage({
       <header>
         <h1 className="text-2xl font-semibold">Retirement projection</h1>
         <p className="text-sm text-muted-foreground">
-          Replaces the broken COMPOUND sheet. Real-return model: target expense is in today's THB,
+          Replaces the broken COMPOUND sheet. Real-return model: target expense is in today&apos;s THB,
           return is real (net of inflation).
         </p>
       </header>
