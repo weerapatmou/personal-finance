@@ -3,11 +3,12 @@ import { redirect, notFound } from "next/navigation";
 import { db } from "@/db";
 import {
   budgetLines,
+  budgetLineDetails,
   transactions,
   monthlyIncome,
   categories,
 } from "@/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import Decimal from "decimal.js";
 import { aggregateMonth, isOverBudget } from "@/lib/months/aggregate";
 import { TOPIC_LABEL_EN } from "@/lib/types";
@@ -15,6 +16,10 @@ import type { Topic } from "@/lib/types";
 import { Fragment } from "react";
 import { CopyPlanButton } from "./copy-plan-button";
 import { IncomeEditor } from "./income-editor";
+import { BudgetLineForm } from "./budget-line-form";
+import { BudgetLineDetailSection } from "./budget-line-detail-section";
+import { MonthChart } from "./month-chart";
+import type { ChartTopic } from "./month-chart";
 import { AppShell } from "@/components/app-shell";
 import { BackButton } from "@/components/back-button";
 
@@ -64,6 +69,28 @@ export default async function MonthDetail({
     }),
   ]);
 
+  // Fetch budget line details for all budget lines in this month
+  const blIds = bls.map((b) => b.id);
+  const details =
+    blIds.length > 0
+      ? await db
+          .select()
+          .from(budgetLineDetails)
+          .where(
+            and(
+              eq(budgetLineDetails.userId, userId),
+              inArray(budgetLineDetails.budgetLineId, blIds),
+            ),
+          )
+      : [];
+
+  // Group details by budgetLineId
+  const detailsByLineId: Record<string, typeof details> = {};
+  for (const d of details) {
+    if (!detailsByLineId[d.budgetLineId]) detailsByLineId[d.budgetLineId] = [];
+    detailsByLineId[d.budgetLineId].push(d);
+  }
+
   const result = aggregateMonth({
     budgetLines: bls.map((b) => ({
       id: b.id,
@@ -94,6 +121,44 @@ export default async function MonthDetail({
   const net = income.minus(result.totalActual);
   const overBudgetThreshold = Number(process.env.OVER_BUDGET_THRESHOLD_PCT ?? "10");
 
+  // Build category lookup for forms (topic → categories)
+  const catsByTopic: Record<Topic, typeof cats> = {
+    FIX: [],
+    VARIABLE: [],
+    INVESTMENT: [],
+    TAX: [],
+  };
+  for (const c of cats) {
+    catsByTopic[c.topic as Topic].push(c);
+  }
+
+  // Chart data
+  const chartData: ChartTopic[] = result.groups.map((g) => ({
+    topic: TOPIC_LABEL_EN[g.topic],
+    plan: g.plannedSubtotal.toNumber(),
+    actual: g.actualSubtotal.toNumber(),
+  }));
+
+  // All budget lines for the detail section
+  const allBudgetLines = bls.map((b) => ({
+    id: b.id,
+    itemNameTh: b.itemNameTh,
+    itemNameEn: b.itemNameEn,
+  }));
+
+  const detailsForSection: Record<
+    string,
+    Array<{ id: string; name: string; amount: string; currency: string }>
+  > = {};
+  for (const [lineId, lineDetails] of Object.entries(detailsByLineId)) {
+    detailsForSection[lineId] = lineDetails.map((d) => ({
+      id: d.id,
+      name: d.name,
+      amount: d.amount,
+      currency: d.currency,
+    }));
+  }
+
   return (
     <AppShell>
       <div className="p-6 sm:p-8 max-w-5xl mx-auto space-y-6">
@@ -113,6 +178,7 @@ export default async function MonthDetail({
           </div>
         </div>
 
+        {/* Budget Table */}
         <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -160,6 +226,17 @@ export default async function MonthDetail({
                     <td className="px-5 py-2.5 text-right font-semibold">{fmt(g.plannedSubtotal)}</td>
                     <td className="px-5 py-2.5 text-right font-semibold">{fmt(g.actualSubtotal)}</td>
                   </tr>
+                  {/* Inline add-budget-line form per topic */}
+                  <BudgetLineForm
+                    year={year}
+                    month={month}
+                    categories={catsByTopic[g.topic].map((c) => ({
+                      id: c.id,
+                      nameTh: c.nameTh,
+                      nameEn: c.nameEn,
+                    }))}
+                    topicLabel={TOPIC_LABEL_EN[g.topic]}
+                  />
                 </tbody>
               ))}
               <tfoot>
@@ -173,9 +250,14 @@ export default async function MonthDetail({
           </div>
         </div>
 
-        <p className="text-xs text-muted-foreground">
-          Full inline editing lands in the next iteration. Use the new-transaction page or recurring rules to populate this month.
-        </p>
+        {/* Detail Sections */}
+        <BudgetLineDetailSection
+          budgetLines={allBudgetLines}
+          detailsByLineId={detailsForSection}
+        />
+
+        {/* Plan vs Actual Chart */}
+        <MonthChart data={chartData} />
       </div>
     </AppShell>
   );

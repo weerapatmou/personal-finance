@@ -24,11 +24,29 @@ export type Spot = {
   currency: string;
 };
 
+// Clean internal symbols → Yahoo Finance ticker for common crypto USD pairs.
+const CRYPTO_USD_PAIRS: Record<string, string> = {
+  BTC: "BTC-USD",
+  ETH: "ETH-USD",
+  BNB: "BNB-USD",
+  SOL: "SOL-USD",
+  ADA: "ADA-USD",
+  XRP: "XRP-USD",
+  DOGE: "DOGE-USD",
+  DOT: "DOT-USD",
+  AVAX: "AVAX-USD",
+  LINK: "LINK-USD",
+  MATIC: "MATIC-USD",
+  UNI: "UNI-USD",
+  ATOM: "ATOM-USD",
+  LTC: "LTC-USD",
+};
+
 /** Maps an internal symbol to Yahoo's ticker. */
 export function toYahooSymbol(symbol: string): string {
   // FX pairs: USD/THB → "THB=X"
   if (symbol === "USDTHB") return "THB=X";
-  if (symbol === "BTC") return "BTC-USD";
+  if (CRYPTO_USD_PAIRS[symbol]) return CRYPTO_USD_PAIRS[symbol];
   // Stocks/ETFs use the bare ticker on Yahoo.
   return symbol;
 }

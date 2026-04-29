@@ -86,42 +86,44 @@ export default async function HomePage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
-  const t = await getTranslations("Home");
   const userId = session.user.id;
 
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth() + 1;
 
-  // Current month income
-  const [incomeRow] = await db
-    .select({ amount: monthlyIncome.amount })
-    .from(monthlyIncome)
-    .where(
-      sql`${monthlyIncome.userId} = ${userId} AND ${monthlyIncome.year} = ${year} AND ${monthlyIncome.month} = ${month}`,
-    )
-    .limit(1);
+  // All four fetches run in parallel — translations + 3 DB queries
+  const [t, incomeResult, spendResult, netWorthResult] = await Promise.all([
+    getTranslations("Home"),
+    db
+      .select({ amount: monthlyIncome.amount })
+      .from(monthlyIncome)
+      .where(
+        sql`${monthlyIncome.userId} = ${userId} AND ${monthlyIncome.year} = ${year} AND ${monthlyIncome.month} = ${month}`,
+      )
+      .limit(1),
+    db
+      .select({
+        total: sql<string>`COALESCE(SUM(${transactions.amount}), 0)::text`,
+      })
+      .from(transactions)
+      .where(
+        sql`${transactions.userId} = ${userId} AND EXTRACT(YEAR FROM ${transactions.date}) = ${year} AND EXTRACT(MONTH FROM ${transactions.date}) = ${month}`,
+      ),
+    db.execute<{ value_base: string }>(sql`
+      SELECT COALESCE(SUM(value_base), 0)::text AS value_base
+      FROM (
+        SELECT DISTINCT ON (holding_id) value_base
+        FROM portfolio_daily
+        WHERE user_id = ${userId}
+        ORDER BY holding_id, date DESC
+      ) latest
+    `),
+  ]);
 
-  // Current month actual spending
-  const [spendRow] = await db
-    .select({
-      total: sql<string>`COALESCE(SUM(${transactions.amount}), 0)::text`,
-    })
-    .from(transactions)
-    .where(
-      sql`${transactions.userId} = ${userId} AND EXTRACT(YEAR FROM ${transactions.date}) = ${year} AND EXTRACT(MONTH FROM ${transactions.date}) = ${month}`,
-    );
-
-  // Latest portfolio net worth
-  const [netWorthRow] = await db.execute<{ value_base: string }>(sql`
-    SELECT COALESCE(SUM(value_base), 0)::text AS value_base
-    FROM (
-      SELECT DISTINCT ON (holding_id) value_base
-      FROM portfolio_daily
-      WHERE user_id = ${userId}
-      ORDER BY holding_id, date DESC
-    ) latest
-  `);
+  const [incomeRow] = incomeResult;
+  const [spendRow] = spendResult;
+  const [netWorthRow] = netWorthResult;
 
   const income = new Decimal(incomeRow?.amount ?? "0");
   const spend = new Decimal(spendRow?.total ?? "0");

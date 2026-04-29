@@ -22,33 +22,30 @@ export default async function MonthsIndex() {
   if (!session?.user?.id) redirect("/login");
   const userId = session.user.id;
 
-  const planRows = await db
-    .select({
-      year: budgetLines.year,
-      month: budgetLines.month,
-      total: sql<string>`COALESCE(SUM(${budgetLines.plannedAmount}), 0)::text`,
-    })
-    .from(budgetLines)
-    .where(eq(budgetLines.userId, userId))
-    .groupBy(budgetLines.year, budgetLines.month);
-
-  const txRows = await db
-    .select({
-      year: sql<number>`EXTRACT(YEAR FROM ${transactions.date})::int`,
-      month: sql<number>`EXTRACT(MONTH FROM ${transactions.date})::int`,
-      total: sql<string>`COALESCE(SUM(${transactions.amount}), 0)::text`,
-    })
-    .from(transactions)
-    .where(eq(transactions.userId, userId))
-    .groupBy(
-      sql`EXTRACT(YEAR FROM ${transactions.date})`,
-      sql`EXTRACT(MONTH FROM ${transactions.date})`,
-    );
-
-  const incomeRows = await db
-    .select()
-    .from(monthlyIncome)
-    .where(eq(monthlyIncome.userId, userId));
+  const [planRows, txRows, incomeRows] = await Promise.all([
+    db
+      .select({
+        year: budgetLines.year,
+        month: budgetLines.month,
+        total: sql<string>`COALESCE(SUM(${budgetLines.plannedAmount}), 0)::text`,
+      })
+      .from(budgetLines)
+      .where(eq(budgetLines.userId, userId))
+      .groupBy(budgetLines.year, budgetLines.month),
+    db
+      .select({
+        year: sql<number>`EXTRACT(YEAR FROM ${transactions.date})::int`,
+        month: sql<number>`EXTRACT(MONTH FROM ${transactions.date})::int`,
+        total: sql<string>`COALESCE(SUM(${transactions.amount}), 0)::text`,
+      })
+      .from(transactions)
+      .where(eq(transactions.userId, userId))
+      .groupBy(
+        sql`EXTRACT(YEAR FROM ${transactions.date})`,
+        sql`EXTRACT(MONTH FROM ${transactions.date})`,
+      ),
+    db.select().from(monthlyIncome).where(eq(monthlyIncome.userId, userId)),
+  ]);
 
   const map = new Map<string, MonthRow>();
   for (const r of planRows) {

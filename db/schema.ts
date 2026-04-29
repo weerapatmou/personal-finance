@@ -202,6 +202,21 @@ export const budgetLines = pgTable(
   }),
 );
 
+export const budgetLineDetails = pgTable("budget_line_details", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  budgetLineId: uuid("budget_line_id")
+    .notNull()
+    .references(() => budgetLines.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 500 }).notNull(),
+  amount: numeric("amount", { precision: 18, scale: 4 }).notNull(),
+  currency: varchar("currency", { length: 3 }).notNull().default("THB"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const monthlyIncome = pgTable(
   "monthly_income",
   {
@@ -620,6 +635,8 @@ export type ImportRun = typeof importRuns.$inferSelect;
 export type ImportStagingRow = typeof importStaging.$inferSelect;
 export type CategoryAlias = typeof categoryAliases.$inferSelect;
 export type BackupExport = typeof backupExports.$inferSelect;
+export type BudgetLineDetail = typeof budgetLineDetails.$inferSelect;
+export type NewBudgetLineDetail = typeof budgetLineDetails.$inferInsert;
 
 // `sql` is imported solely for use by drizzle-kit when introspecting; reference it
 // here so that future migrations or raw queries have a stable import path.

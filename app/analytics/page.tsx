@@ -12,38 +12,38 @@ export default async function AnalyticsPage() {
   if (!session?.user?.id) redirect("/login");
   const userId = session.user.id;
 
-  const spendByMonth = await db
-    .select({
-      year: sql<number>`EXTRACT(YEAR FROM ${transactions.date})::int`,
-      month: sql<number>`EXTRACT(MONTH FROM ${transactions.date})::int`,
-      topic: categories.topic,
-      total: sql<string>`COALESCE(SUM(${transactions.amount}), 0)::text`,
-    })
-    .from(transactions)
-    .innerJoin(categories, eq(transactions.categoryId, categories.id))
-    .where(eq(transactions.userId, userId))
-    .groupBy(
-      sql`EXTRACT(YEAR FROM ${transactions.date})`,
-      sql`EXTRACT(MONTH FROM ${transactions.date})`,
-      categories.topic,
-    );
-
-  const topCats = await db
-    .select({
-      categoryId: categories.id,
-      nameTh: categories.nameTh,
-      total: sql<string>`COALESCE(SUM(${transactions.amount}), 0)::text`,
-    })
-    .from(transactions)
-    .innerJoin(categories, eq(transactions.categoryId, categories.id))
-    .where(
-      sql`${transactions.userId} = ${userId} AND ${transactions.date} >= NOW() - INTERVAL '90 days'`,
-    )
-    .groupBy(categories.id, categories.nameTh)
-    .orderBy(sql`SUM(${transactions.amount}) DESC`)
-    .limit(15);
-
-  const incomes = await db.select().from(monthlyIncome).where(eq(monthlyIncome.userId, userId));
+  const [spendByMonth, topCats, incomes] = await Promise.all([
+    db
+      .select({
+        year: sql<number>`EXTRACT(YEAR FROM ${transactions.date})::int`,
+        month: sql<number>`EXTRACT(MONTH FROM ${transactions.date})::int`,
+        topic: categories.topic,
+        total: sql<string>`COALESCE(SUM(${transactions.amount}), 0)::text`,
+      })
+      .from(transactions)
+      .innerJoin(categories, eq(transactions.categoryId, categories.id))
+      .where(eq(transactions.userId, userId))
+      .groupBy(
+        sql`EXTRACT(YEAR FROM ${transactions.date})`,
+        sql`EXTRACT(MONTH FROM ${transactions.date})`,
+        categories.topic,
+      ),
+    db
+      .select({
+        categoryId: categories.id,
+        nameTh: categories.nameTh,
+        total: sql<string>`COALESCE(SUM(${transactions.amount}), 0)::text`,
+      })
+      .from(transactions)
+      .innerJoin(categories, eq(transactions.categoryId, categories.id))
+      .where(
+        sql`${transactions.userId} = ${userId} AND ${transactions.date} >= NOW() - INTERVAL '90 days'`,
+      )
+      .groupBy(categories.id, categories.nameTh)
+      .orderBy(sql`SUM(${transactions.amount}) DESC`)
+      .limit(15),
+    db.select().from(monthlyIncome).where(eq(monthlyIncome.userId, userId)),
+  ]);
 
   const netRows = new Map<string, { income: Decimal; spend: Decimal }>();
   for (const i of incomes) {

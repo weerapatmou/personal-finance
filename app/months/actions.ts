@@ -3,6 +3,7 @@
 import { db } from "@/db";
 import {
   budgetLines,
+  budgetLineDetails,
   transactions,
   monthlyIncome,
   categories,
@@ -194,6 +195,51 @@ export async function upsertMonthlyIncome(input: unknown) {
     });
 
   revalidatePath(`/months/${pad(data.year)}-${pad2(data.month)}`);
+}
+
+// ─── BudgetLineDetail CRUD ────────────────────────────────────────────────────
+
+const budgetLineDetailInput = z.object({
+  budgetLineId: z.string().uuid(),
+  name: z.string().min(1).max(500),
+  amount: decimalString,
+  currency: z.enum(["THB", "USD"]).default("THB"),
+});
+
+export async function createBudgetLineDetail(input: unknown) {
+  const userId = await requireUserId();
+  const data = budgetLineDetailInput.parse(input);
+
+  const bl = await db.query.budgetLines.findFirst({
+    where: and(eq(budgetLines.id, data.budgetLineId), eq(budgetLines.userId, userId)),
+  });
+  if (!bl) throw new Error("Budget line not found");
+
+  await db.insert(budgetLineDetails).values({
+    userId,
+    budgetLineId: data.budgetLineId,
+    name: data.name,
+    amount: data.amount,
+    currency: data.currency,
+  });
+
+  revalidatePath(`/months/${pad(bl.year)}-${pad2(bl.month)}`);
+}
+
+export async function deleteBudgetLineDetail(id: string) {
+  const userId = await requireUserId();
+
+  const existing = await db.query.budgetLineDetails.findFirst({
+    where: and(eq(budgetLineDetails.id, id), eq(budgetLineDetails.userId, userId)),
+  });
+  if (!existing) throw new Error("Detail not found");
+
+  await db.delete(budgetLineDetails).where(eq(budgetLineDetails.id, id));
+
+  const bl = await db.query.budgetLines.findFirst({
+    where: eq(budgetLines.id, existing.budgetLineId),
+  });
+  if (bl) revalidatePath(`/months/${pad(bl.year)}-${pad2(bl.month)}`);
 }
 
 // ─── Month creation + copy from previous ─────────────────────────────────────

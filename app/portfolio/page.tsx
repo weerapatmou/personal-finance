@@ -16,24 +16,37 @@ export default async function PortfolioDashboard() {
   if (!session?.user?.id) redirect("/login");
   const userId = session.user.id;
 
-  const latestRows = await db.execute<{
-    holding_id: string;
-    date: string;
-    units_held: string;
-    price_native: string;
-    price_currency: string;
-    value_base: string;
-    is_stale: boolean;
-  }>(sql`
-    SELECT DISTINCT ON (holding_id)
-      holding_id, date, units_held, price_native, price_currency, value_base, is_stale
-    FROM portfolio_daily
-    WHERE user_id = ${userId}
-    ORDER BY holding_id, date DESC
-  `);
-
-  const allHoldings = await db.select().from(holdings).where(eq(holdings.userId, userId));
-  const allTxs = await db.select().from(investmentTxs).where(eq(investmentTxs.userId, userId));
+  const [latestRows, allHoldings, allTxs] = await Promise.all([
+    db.execute<{
+      holding_id: string;
+      date: string;
+      units_held: string;
+      price_native: string;
+      price_currency: string;
+      value_base: string;
+      is_stale: boolean;
+    }>(sql`
+      SELECT DISTINCT ON (holding_id)
+        holding_id, date, units_held, price_native, price_currency, value_base, is_stale
+      FROM portfolio_daily
+      WHERE user_id = ${userId}
+      ORDER BY holding_id, date DESC
+    `),
+    db.select().from(holdings).where(eq(holdings.userId, userId)),
+    // Only fetch the columns that replay() needs — skips id, note, createdAt, etc.
+    db
+      .select({
+        holdingId: investmentTxs.holdingId,
+        date: investmentTxs.date,
+        type: investmentTxs.type,
+        units: investmentTxs.units,
+        priceNative: investmentTxs.priceNative,
+        feesNative: investmentTxs.feesNative,
+        splitRatio: investmentTxs.splitRatio,
+      })
+      .from(investmentTxs)
+      .where(eq(investmentTxs.userId, userId)),
+  ]);
 
   const txByHolding = new Map<string, InvestmentTxInput[]>();
   for (const t of allTxs) {
