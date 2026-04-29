@@ -7,9 +7,7 @@
 // yahoo-finance2 has strict overloads keyed off schema validation that don't
 // always match our call sites. Treat the imported binding as a permissive
 // shape at this single boundary; downstream code consumes our typed return.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 import yahooFinanceTyped from "yahoo-finance2";
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const yahooFinance = yahooFinanceTyped as any;
 
 export type DailyBar = {

@@ -43,7 +43,7 @@ export function computeBuckets(input: TaxYearInputs): {
 } {
   const { assessableIncome, contributions } = input;
 
-  const sumWhere = (predicate: (c: TaxContribution) => boolean) =>
+  const sumWhere = (predicate: (_c: TaxContribution) => boolean) =>
     contributions.filter(predicate).reduce((s, c) => s.plus(c.amount), new Decimal(0));
 
   const pfOwn = sumWhere((c) => c.taxTreatment === "PF_CONTRIB");

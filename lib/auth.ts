@@ -7,12 +7,14 @@ import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
 declare module "next-auth" {
+  // eslint-disable-next-line no-unused-vars
   interface Session {
     user: {
       id: string;
       username: string;
     } & DefaultSession["user"];
   }
+  // eslint-disable-next-line no-unused-vars
   interface User {
     id?: string;
     username?: string;

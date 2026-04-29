@@ -1,8 +1,8 @@
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { holdings, portfolioDaily, investmentTxs } from "@/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { holdings, investmentTxs } from "@/db/schema";
+import { eq, sql } from "drizzle-orm";
 import Link from "next/link";
 import Decimal from "decimal.js";
 import { replay } from "@/lib/cost-basis";

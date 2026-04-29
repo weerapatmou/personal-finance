@@ -24,7 +24,6 @@ export async function parseXlsxToStaging(
   const workbook = new ExcelJS.Workbook();
   // ExcelJS's `load` accepts an ArrayBuffer-like; the type is narrower than
   // node Buffer in newer @types/node, so cast at the boundary.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await workbook.xlsx.load(data as any);
 
   const out: StagedRow[] = [];

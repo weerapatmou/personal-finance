@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { recurringRules, budgetLines, transactions } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { expandOccurrences, isoDateToYearMonth } from "@/lib/recurring/expand";
 
 type BudgetLineTemplate = {
