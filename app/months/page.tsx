@@ -8,13 +8,14 @@ import Decimal from "decimal.js";
 import { AppShell } from "@/components/app-shell";
 import { BackButton } from "@/components/back-button";
 import { Plus, TrendingUp, TrendingDown } from "lucide-react";
+import { DeleteMonthButton } from "./delete-month-button";
 
 type MonthRow = {
   year: number;
   month: number;
   income: string | null;
-  totalPlanned: string;
-  totalActual: string;
+  totalPlanned: Decimal;
+  totalActual: Decimal;
 };
 
 export default async function MonthsIndex() {
@@ -22,47 +23,61 @@ export default async function MonthsIndex() {
   if (!session?.user?.id) redirect("/login");
   const userId = session.user.id;
 
-  const [planRows, txRows, incomeRows] = await Promise.all([
+  const [bls, txs, incomeRows] = await Promise.all([
     db
       .select({
+        id: budgetLines.id,
         year: budgetLines.year,
         month: budgetLines.month,
-        total: sql<string>`COALESCE(SUM(${budgetLines.plannedAmount}), 0)::text`,
+        planned: budgetLines.plannedAmount,
+        manual: budgetLines.manualActual,
       })
       .from(budgetLines)
-      .where(eq(budgetLines.userId, userId))
-      .groupBy(budgetLines.year, budgetLines.month),
+      .where(eq(budgetLines.userId, userId)),
     db
       .select({
         year: sql<number>`EXTRACT(YEAR FROM ${transactions.date})::int`,
         month: sql<number>`EXTRACT(MONTH FROM ${transactions.date})::int`,
-        total: sql<string>`COALESCE(SUM(${transactions.amount}), 0)::text`,
+        amount: transactions.amount,
+        budgetLineId: transactions.budgetLineId,
       })
       .from(transactions)
-      .where(eq(transactions.userId, userId))
-      .groupBy(
-        sql`EXTRACT(YEAR FROM ${transactions.date})`,
-        sql`EXTRACT(MONTH FROM ${transactions.date})`,
-      ),
+      .where(eq(transactions.userId, userId)),
     db.select().from(monthlyIncome).where(eq(monthlyIncome.userId, userId)),
   ]);
 
   const map = new Map<string, MonthRow>();
-  for (const r of planRows) {
-    const key = `${r.year}-${r.month}`;
-    map.set(key, { year: r.year, month: r.month, income: null, totalPlanned: r.total, totalActual: "0" });
+  const ensure = (year: number, month: number): MonthRow => {
+    const key = `${year}-${month}`;
+    let row = map.get(key);
+    if (!row) {
+      row = { year, month, income: null, totalPlanned: new Decimal(0), totalActual: new Decimal(0) };
+      map.set(key, row);
+    }
+    return row;
+  };
+
+  // Plan + actuals from budget lines (manualActual takes priority over linked tx)
+  const linesWithManual = new Set<string>();
+  for (const bl of bls) {
+    const row = ensure(bl.year, bl.month);
+    row.totalPlanned = row.totalPlanned.plus(new Decimal(bl.planned));
+    if (bl.manual !== null) {
+      row.totalActual = row.totalActual.plus(new Decimal(bl.manual));
+      linesWithManual.add(bl.id);
+    }
   }
-  for (const r of txRows) {
-    const key = `${r.year}-${r.month}`;
-    const cur = map.get(key) ?? { year: r.year, month: r.month, income: null, totalPlanned: "0", totalActual: "0" };
-    cur.totalActual = r.total;
-    map.set(key, cur);
+
+  // Transactions count toward actual UNLESS their budget line has a manualActual set
+  for (const tx of txs) {
+    if (tx.budgetLineId && linesWithManual.has(tx.budgetLineId)) continue;
+    const row = ensure(tx.year, tx.month);
+    row.totalActual = row.totalActual.plus(new Decimal(tx.amount));
   }
+
   for (const r of incomeRows) {
-    const key = `${r.year}-${r.month}`;
-    const cur = map.get(key) ?? { year: r.year, month: r.month, income: null, totalPlanned: "0", totalActual: "0" };
-    cur.income = r.amount;
-    map.set(key, cur);
+    const row = ensure(r.year, r.month);
+    row.income = r.amount;
   }
 
   const months = Array.from(map.values()).sort((a, b) => {
@@ -100,8 +115,8 @@ export default async function MonthsIndex() {
           <div className="space-y-3">
             {months.map((m) => {
               const income = new Decimal(m.income ?? "0");
-              const planned = new Decimal(m.totalPlanned);
-              const actual = new Decimal(m.totalActual);
+              const planned = m.totalPlanned;
+              const actual = m.totalActual;
               const net = income.minus(actual);
               const slug = `${pad4(m.year)}-${pad2(m.month)}`;
               const isPositive = net.greaterThanOrEqualTo(0);
@@ -142,6 +157,11 @@ export default async function MonthsIndex() {
                       >
                         View
                       </Link>
+                      <DeleteMonthButton
+                        year={m.year}
+                        month={m.month}
+                        label={monthLabel(m.year, m.month)}
+                      />
                     </div>
                   </div>
                 </div>

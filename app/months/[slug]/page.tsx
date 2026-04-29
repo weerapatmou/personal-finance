@@ -10,7 +10,7 @@ import {
 } from "@/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import Decimal from "decimal.js";
-import { aggregateMonth, isOverBudget } from "@/lib/months/aggregate";
+import { aggregateMonth } from "@/lib/months/aggregate";
 import { TOPIC_LABEL_EN } from "@/lib/types";
 import type { Topic } from "@/lib/types";
 import { Fragment } from "react";
@@ -19,6 +19,8 @@ import { IncomeEditor } from "./income-editor";
 import { BudgetLineForm } from "./budget-line-form";
 import { ActualCell } from "./actual-cell";
 import { DetailActualCell } from "./detail-modal";
+import { DeleteLineButton } from "./delete-line-button";
+import { EditableNameCell, EditablePlanCell } from "./editable-line-cells";
 import { MonthChart } from "./month-chart";
 import type { ChartTopic } from "./month-chart";
 import { AppShell } from "@/components/app-shell";
@@ -137,7 +139,6 @@ export default async function MonthDetail({
 
   const income = new Decimal(incomeRow?.amount ?? "0");
   const net = income.minus(result.totalActual);
-  const overBudgetThreshold = Number(process.env.OVER_BUDGET_THRESHOLD_PCT ?? "10");
 
   // Lookup: budgetLineId → budget line row (for ActualCell/DetailActualCell)
   const blById = new Map(bls.map((b) => [b.id, b]));
@@ -208,21 +209,26 @@ export default async function MonthDetail({
                       {TOPIC_LABEL_EN[g.topic]}
                     </td>
                   </tr>
-                  {g.categories.map((c) => (
+                  {g.categories.map((c) => {
+                    const catColor = c.actualSubtotal.greaterThan(c.plannedSubtotal)
+                      ? "text-destructive"
+                      : "text-emerald-600";
+                    return (
                     <Fragment key={c.categoryId}>
                       <tr className="bg-muted/10">
                         <td className="px-5 py-2 pl-8 text-xs italic text-muted-foreground">
-                          {c.categoryNameEn} / {c.categoryNameTh}
+                          {c.categoryNameEn === c.categoryNameTh
+                            ? c.categoryNameEn
+                            : `${c.categoryNameEn} / ${c.categoryNameTh}`}
                         </td>
                         <td className="px-5 py-2 text-right text-xs text-muted-foreground">
                           {fmt(c.plannedSubtotal)}
                         </td>
-                        <td className="px-5 py-2 text-right text-xs text-muted-foreground">
+                        <td className={`px-5 py-2 text-right text-xs ${catColor}`}>
                           {fmt(c.actualSubtotal)}
                         </td>
                       </tr>
                       {c.lines.map((l) => {
-                        const over = isOverBudget(l.planned, l.actual, overBudgetThreshold);
                         const bl = l.budgetLineId ? blById.get(l.budgetLineId) : null;
                         const cat = bl ? catById.get(bl.categoryId) : null;
                         const isSpecial =
@@ -232,28 +238,42 @@ export default async function MonthDetail({
                         return (
                           <tr
                             key={`${c.categoryId}-${l.budgetLineId ?? "x"}-${l.itemNameTh}`}
-                            className="hover:bg-muted/30 transition-colors"
+                            className="group hover:bg-muted/30 transition-colors"
                           >
-                            <td className="px-5 py-2.5 pl-12">{l.itemNameTh}</td>
-                            <td className="px-5 py-2.5 text-right font-mono">
-                              {fmt(l.planned)}
+                            <td className="px-5 py-2.5 pl-12">
+                              <div className="flex items-center justify-between gap-2 pr-2">
+                                <EditableNameCell
+                                  budgetLineId={l.budgetLineId}
+                                  initial={l.itemNameTh}
+                                />
+                                {l.budgetLineId && (
+                                  <DeleteLineButton
+                                    id={l.budgetLineId}
+                                    name={l.itemNameTh}
+                                  />
+                                )}
+                              </div>
                             </td>
-                            <td
-                              className={`px-5 py-2.5 text-right ${
-                                over ? "font-semibold text-destructive" : ""
-                              }`}
-                            >
+                            <td className="px-5 py-2.5 text-right">
+                              <EditablePlanCell
+                                budgetLineId={l.budgetLineId}
+                                initial={l.planned.toString()}
+                              />
+                            </td>
+                            <td className="px-5 py-2.5 text-right">
                               {isSpecial && bl ? (
                                 <DetailActualCell
                                   budgetLineId={bl.id}
                                   categoryName={cat!.nameEn}
                                   actual={l.actual.toString()}
+                                  planned={l.planned.toString()}
                                   initialDetails={detailsByLineId[bl.id] ?? []}
                                 />
                               ) : (
                                 <ActualCell
                                   budgetLineId={l.budgetLineId}
                                   initialActual={l.actual.toString()}
+                                  planned={l.planned.toString()}
                                 />
                               )}
                             </td>
@@ -261,13 +281,22 @@ export default async function MonthDetail({
                         );
                       })}
                     </Fragment>
-                  ))}
+                    );
+                  })}
                   <tr className="border-t border-border bg-muted/20">
                     <td className="px-5 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       Subtotal {TOPIC_LABEL_EN[g.topic]}
                     </td>
                     <td className="px-5 py-2.5 text-right font-semibold">{fmt(g.plannedSubtotal)}</td>
-                    <td className="px-5 py-2.5 text-right font-semibold">{fmt(g.actualSubtotal)}</td>
+                    <td
+                      className={`px-5 py-2.5 text-right font-semibold ${
+                        g.actualSubtotal.greaterThan(g.plannedSubtotal)
+                          ? "text-destructive"
+                          : "text-emerald-600"
+                      }`}
+                    >
+                      {fmt(g.actualSubtotal)}
+                    </td>
                   </tr>
                   <BudgetLineForm
                     year={year}
@@ -288,7 +317,15 @@ export default async function MonthDetail({
                     TOTAL
                   </td>
                   <td className="px-5 py-3 text-right font-bold">{fmt(result.totalPlanned)}</td>
-                  <td className="px-5 py-3 text-right font-bold">{fmt(result.totalActual)}</td>
+                  <td
+                    className={`px-5 py-3 text-right font-bold ${
+                      result.totalActual.greaterThan(result.totalPlanned)
+                        ? "text-destructive"
+                        : "text-emerald-600"
+                    }`}
+                  >
+                    {fmt(result.totalActual)}
+                  </td>
                 </tr>
               </tfoot>
             </table>

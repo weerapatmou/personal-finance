@@ -4,23 +4,19 @@ import { getTranslations } from "next-intl/server";
 import Link from "next/link";
 import { db } from "@/db";
 import { transactions, monthlyIncome } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import Decimal from "decimal.js";
 import { AppShell } from "@/components/app-shell";
 import { CurrencySelector } from "@/components/currency-selector";
+import { YearSelector } from "./year-selector";
 import {
   Calendar,
   TrendingUp,
   BarChart2,
-  Receipt,
-  Clock,
   Briefcase,
-  Upload,
-  RefreshCw,
   ArrowUpRight,
   ArrowDownRight,
   Minus,
-  Bell,
 } from "lucide-react";
 
 const QUICK_NAV = [
@@ -46,76 +42,59 @@ const QUICK_NAV = [
     color: "bg-indigo-100 text-indigo-600",
   },
   {
-    href: "/tax",
-    label: "Tax Planner",
-    description: "Thai PIT headroom",
-    icon: Receipt,
-    color: "bg-amber-100 text-amber-600",
-  },
-  {
-    href: "/retirement",
-    label: "Retirement",
-    description: "FIRE projection",
-    icon: Clock,
-    color: "bg-emerald-100 text-emerald-600",
-  },
-  {
     href: "/portfolio/holdings",
     label: "Holdings",
     description: "Manage positions",
     icon: Briefcase,
     color: "bg-sky-100 text-sky-600",
   },
-  {
-    href: "/settings/import",
-    label: "Import",
-    description: "Upload XLSX sheets",
-    icon: Upload,
-    color: "bg-rose-100 text-rose-600",
-  },
-  {
-    href: "/settings/recurring",
-    label: "Recurring",
-    description: "Auto-populate budgets",
-    icon: RefreshCw,
-    color: "bg-teal-100 text-teal-600",
-  },
 ];
 
-export default async function HomePage() {
+interface OverviewPageProps {
+  searchParams: Promise<{ year?: string }>;
+}
+
+export default async function OverviewPage({ searchParams }: OverviewPageProps) {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
   const userId = session.user.id;
+  const params = await searchParams;
 
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1;
+  const currentYear = new Date().getFullYear();
+  const parsedYear = Number(params.year);
+  const year =
+    Number.isFinite(parsedYear) && parsedYear >= 2000 && parsedYear <= 2100
+      ? parsedYear
+      : currentYear;
 
-  // All four fetches run in parallel — translations + 3 DB queries
+  const years = Array.from({ length: 6 }, (_, i) => currentYear - i);
+  if (!years.includes(year)) years.unshift(year);
+
+  const yearEnd = `${year}-12-31`;
+
   const [t, incomeResult, spendResult, netWorthResult] = await Promise.all([
     getTranslations("Home"),
     db
-      .select({ amount: monthlyIncome.amount })
+      .select({
+        total: sql<string>`COALESCE(SUM(${monthlyIncome.amount}), 0)::text`,
+      })
       .from(monthlyIncome)
-      .where(
-        sql`${monthlyIncome.userId} = ${userId} AND ${monthlyIncome.year} = ${year} AND ${monthlyIncome.month} = ${month}`,
-      )
-      .limit(1),
+      .where(sql`${monthlyIncome.userId} = ${userId} AND ${monthlyIncome.year} = ${year}`),
     db
       .select({
         total: sql<string>`COALESCE(SUM(${transactions.amount}), 0)::text`,
       })
       .from(transactions)
       .where(
-        sql`${transactions.userId} = ${userId} AND EXTRACT(YEAR FROM ${transactions.date}) = ${year} AND EXTRACT(MONTH FROM ${transactions.date}) = ${month}`,
+        sql`${transactions.userId} = ${userId} AND EXTRACT(YEAR FROM ${transactions.date}) = ${year}`,
       ),
     db.execute<{ value_base: string }>(sql`
       SELECT COALESCE(SUM(value_base), 0)::text AS value_base
       FROM (
         SELECT DISTINCT ON (holding_id) value_base
         FROM portfolio_daily
-        WHERE user_id = ${userId}
+        WHERE user_id = ${userId} AND date <= ${yearEnd}
         ORDER BY holding_id, date DESC
       ) latest
     `),
@@ -125,7 +104,7 @@ export default async function HomePage() {
   const [spendRow] = spendResult;
   const [netWorthRow] = netWorthResult;
 
-  const income = new Decimal(incomeRow?.amount ?? "0");
+  const income = new Decimal(incomeRow?.total ?? "0");
   const spend = new Decimal(spendRow?.total ?? "0");
   const net = income.minus(spend);
   const netWorth = new Decimal(netWorthRow?.value_base ?? "0");
@@ -134,7 +113,8 @@ export default async function HomePage() {
     name: session.user.name ?? session.user.username ?? "",
   });
 
-  const monthName = now.toLocaleString("en-US", { month: "long" });
+  const isCurrentYear = year === currentYear;
+  const portfolioLabel = isCurrentYear ? "Portfolio Value" : `Portfolio Value (end of ${year})`;
 
   return (
     <AppShell>
@@ -144,13 +124,14 @@ export default async function HomePage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">{greeting}</h1>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              Here&apos;s your financial overview for {monthName} {year}
+              Here&apos;s your financial overview for {year}
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <button className="flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-card shadow-sm hover:bg-muted transition-colors" aria-label="Notifications">
-              <Bell className="h-4 w-4 text-muted-foreground" />
-            </button>
+            <div className="flex flex-col items-end gap-1">
+              <span className="text-xs text-muted-foreground">Year</span>
+              <YearSelector selectedYear={year} years={years} />
+            </div>
             <div className="flex flex-col items-end gap-1">
               <span className="text-xs text-muted-foreground">Display currency</span>
               <CurrencySelector userId={userId} />
@@ -161,14 +142,14 @@ export default async function HomePage() {
         {/* Stat cards */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard
-            label="This Month Income"
+            label={`${year} Income`}
             value={fmt(income)}
             icon={<ArrowUpRight className="h-4 w-4" />}
             iconBg="bg-emerald-100 text-emerald-600"
             trend={income.isZero() ? null : "up"}
           />
           <StatCard
-            label="This Month Spend"
+            label={`${year} Spend`}
             value={fmt(spend)}
             icon={<ArrowDownRight className="h-4 w-4" />}
             iconBg="bg-rose-100 text-rose-600"
@@ -183,7 +164,7 @@ export default async function HomePage() {
             trend={null}
           />
           <StatCard
-            label="Portfolio Value"
+            label={portfolioLabel}
             value={fmt(netWorth)}
             icon={<TrendingUp className="h-4 w-4" />}
             iconBg="bg-violet-100 text-violet-600"
@@ -203,7 +184,9 @@ export default async function HomePage() {
                   href={item.href}
                   className="group flex items-start gap-4 rounded-2xl border border-border bg-card p-4 shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5"
                 >
-                  <div className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${item.color}`}>
+                  <div
+                    className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${item.color}`}
+                  >
                     <Icon className="h-5 w-5" />
                   </div>
                   <div className="min-w-0">
@@ -242,7 +225,9 @@ function StatCard({
   return (
     <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
       <div className="flex items-start justify-between">
-        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</p>
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          {label}
+        </p>
         <div className={`flex h-8 w-8 items-center justify-center rounded-xl ${iconBg}`}>
           {icon}
         </div>
@@ -251,8 +236,10 @@ function StatCard({
         {value}
       </p>
       {trend && (
-        <p className={`mt-1 text-xs font-medium ${trend === "up" ? "text-emerald-600" : "text-rose-600"}`}>
-          {trend === "up" ? "↑ This month" : "↓ This month"}
+        <p
+          className={`mt-1 text-xs font-medium ${trend === "up" ? "text-emerald-600" : "text-rose-600"}`}
+        >
+          {trend === "up" ? "↑ This year" : "↓ This year"}
         </p>
       )}
     </div>

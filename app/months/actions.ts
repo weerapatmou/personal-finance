@@ -381,6 +381,38 @@ export async function createMonth(input: unknown) {
   revalidatePath("/months");
 }
 
+export async function deleteMonth(year: number, month: number) {
+  const userId = await requireUserId();
+  z.number().int().min(2000).max(2200).parse(year);
+  z.number().int().min(1).max(12).parse(month);
+
+  // Removes budget lines (cascades to budget_line_details) and the income row.
+  // Transactions keep their date but lose their budget_line_id link via the
+  // schema's ON DELETE SET NULL.
+  await db
+    .delete(budgetLines)
+    .where(
+      and(
+        eq(budgetLines.userId, userId),
+        eq(budgetLines.year, year),
+        eq(budgetLines.month, month),
+      ),
+    );
+
+  await db
+    .delete(monthlyIncome)
+    .where(
+      and(
+        eq(monthlyIncome.userId, userId),
+        eq(monthlyIncome.year, year),
+        eq(monthlyIncome.month, month),
+      ),
+    );
+
+  revalidatePath("/months");
+  revalidatePath(`/months/${pad(year)}-${pad2(month)}`);
+}
+
 export async function copyPlanFromPreviousMonth(
   year: number,
   month: number,

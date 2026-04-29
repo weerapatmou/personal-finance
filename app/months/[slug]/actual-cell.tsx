@@ -12,21 +12,28 @@ function fmtTHB(s: string | number | null): string {
   }).format(n);
 }
 
+function colorFor(actual: string | number, planned: string | number): string {
+  return Number(actual) > Number(planned) ? "text-destructive" : "text-emerald-600";
+}
+
 export function ActualCell({
   budgetLineId,
   initialActual,
+  planned,
 }: {
   budgetLineId: string | null;
   initialActual: string;
+  planned: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(initialActual);
   const [pending, startTransition] = useTransition();
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // If there's no budget line (unmapped transaction row), just show plain text
+  const color = colorFor(initialActual, planned);
+
   if (!budgetLineId) {
-    return <span className="font-mono">{fmtTHB(initialActual)}</span>;
+    return <span className={`font-mono ${color}`}>{fmtTHB(initialActual)}</span>;
   }
 
   const save = () => {
@@ -67,11 +74,11 @@ export function ActualCell({
         setEditing(true);
         setValue(initialActual === "0" ? "" : initialActual);
       }}
-      className="group flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted/50 transition-colors font-mono text-sm disabled:opacity-40"
+      className={`group/cell flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted/50 transition-colors font-mono text-sm disabled:opacity-40 ${color}`}
       title="Click to edit actual"
     >
       <span>{fmtTHB(initialActual)}</span>
-      <span className="text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
+      <span className="text-[10px] text-muted-foreground opacity-0 group-hover/cell:opacity-100 transition-opacity">
         ✏
       </span>
     </button>

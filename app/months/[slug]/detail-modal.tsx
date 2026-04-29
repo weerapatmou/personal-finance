@@ -277,11 +277,13 @@ export function DetailActualCell({
   budgetLineId,
   categoryName,
   actual,
+  planned,
   initialDetails,
 }: {
   budgetLineId: string;
   categoryName: string;
   actual: string;
+  planned: string;
   initialDetails: Detail[];
 }) {
   const [open, setOpen] = useState(false);
@@ -292,16 +294,19 @@ export function DetailActualCell({
     minimumFractionDigits: 2,
   }).format(Number(actual));
 
+  const color =
+    Number(actual) > Number(planned) ? "text-destructive" : "text-emerald-600";
+
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="group flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted/50 transition-colors font-mono text-sm"
+        className={`group/cell flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted/50 transition-colors font-mono text-sm ${color}`}
         title={`Edit ${categoryName} items`}
       >
         <span>{fmtValue}</span>
-        <span className="text-[10px] text-primary opacity-60 group-hover:opacity-100 transition-opacity">
+        <span className="text-[10px] text-primary opacity-60 group-hover/cell:opacity-100 transition-opacity">
           📋
         </span>
       </button>

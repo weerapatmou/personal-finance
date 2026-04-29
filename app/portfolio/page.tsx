@@ -12,6 +12,7 @@ import { BackButton } from "@/components/back-button";
 import { Plus } from "lucide-react";
 import { CategoryPieChart } from "./category-pie-chart";
 import { RefreshPricesButton } from "./refresh-prices-button";
+import { DeleteHoldingButton } from "./holdings/delete-holding-button";
 
 // Display categories shown on the dashboard. The user thinks in these 6 buckets;
 // the underlying schema has finer-grained asset_class values that we group here.
@@ -242,12 +243,13 @@ export default async function PortfolioDashboard() {
                   <th className="px-5 py-3 text-right">Price</th>
                   <th className="px-5 py-3 text-right">Native value</th>
                   <th className="px-5 py-3 text-right">Value (THB)</th>
+                  <th className="px-5 py-3 text-right w-12"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {rows.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-5 py-12 text-center text-muted-foreground">
+                    <td colSpan={7} className="px-5 py-12 text-center text-muted-foreground">
                       No holdings yet. Click <span className="font-medium">Add holding</span> to start.
                     </td>
                   </tr>
@@ -278,6 +280,9 @@ export default async function PortfolioDashboard() {
                         <span className="ml-1 text-xs text-muted-foreground">{r.nativeCurrency}</span>
                       </td>
                       <td className="px-5 py-3 text-right font-mono font-semibold">{fmtTHB(r.valueThb)}</td>
+                      <td className="px-2 py-3 text-right">
+                        <DeleteHoldingButton holdingId={r.id} name={r.name} />
+                      </td>
                     </tr>
                   ))
                 )}

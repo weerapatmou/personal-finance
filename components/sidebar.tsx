@@ -8,28 +8,26 @@ import {
   Calendar,
   TrendingUp,
   BarChart2,
-  Receipt,
-  Clock,
   Briefcase,
-  Upload,
-  RefreshCw,
-  Settings,
   LogOut,
   Menu,
   X,
   Wallet,
 } from "lucide-react";
 
-const NAV_ITEMS = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
+type NavItem = {
+  href: string;
+  label: string;
+  icon: typeof Calendar;
+  exact?: boolean;
+};
+
+const NAV_ITEMS: NavItem[] = [
+  { href: "/", label: "Overview", icon: LayoutDashboard, exact: true },
   { href: "/months", label: "Months", icon: Calendar },
-  { href: "/portfolio", label: "Portfolio", icon: TrendingUp },
+  { href: "/portfolio", label: "Portfolio", icon: TrendingUp, exact: true },
   { href: "/analytics", label: "Analytics", icon: BarChart2 },
-  { href: "/tax", label: "Tax Planner", icon: Receipt },
-  { href: "/retirement", label: "Retirement", icon: Clock },
   { href: "/portfolio/holdings", label: "Holdings", icon: Briefcase },
-  { href: "/settings/import", label: "Import", icon: Upload },
-  { href: "/settings/recurring", label: "Recurring", icon: RefreshCw },
 ];
 
 interface SidebarProps {
