@@ -5,6 +5,9 @@ import { importRuns } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
 import Link from "next/link";
 import { uploadXlsx } from "./actions";
+import { AppShell } from "@/components/app-shell";
+import { BackButton } from "@/components/back-button";
+import { Upload } from "lucide-react";
 
 export default async function ImportPage() {
   const session = await auth();
@@ -18,67 +21,76 @@ export default async function ImportPage() {
     .limit(20);
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 p-4 sm:p-8">
-      <header>
-        <h1 className="text-2xl font-semibold">Import xlsx</h1>
-        <p className="text-sm text-muted-foreground">
-          Upload your legacy Personal Finance.xlsx. Stage 1 parses the file into
-          a staging table; you map the categories in Stage 2; commit writes the
-          live BudgetLine / Transaction / MonthlyIncome rows.
-        </p>
-      </header>
+    <AppShell>
+      <div className="p-6 sm:p-8 max-w-3xl mx-auto space-y-6">
+        <div className="pt-8 lg:pt-0 space-y-4">
+          <BackButton href="/" label="Dashboard" />
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Import XLSX</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Upload your legacy Personal Finance.xlsx. Stage 1 parses the file;
+              Stage 2 maps categories; commit writes the live rows.
+            </p>
+          </div>
+        </div>
 
-      <form
-        action={async (formData) => {
-          "use server";
-          const { runId } = await uploadXlsx(formData);
-          redirect(`/settings/import/${runId}`);
-        }}
-        className="flex flex-col gap-3 rounded-md border p-4"
-      >
-        <input
-          type="file"
-          name="file"
-          accept=".xlsx"
-          required
-          className="text-sm"
-        />
-        <button
-          type="submit"
-          className="self-start rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground"
-        >
-          Upload &amp; stage
-        </button>
-      </form>
-
-      <section>
-        <h2 className="mb-2 text-lg font-medium">Recent imports</h2>
-        {runs.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No imports yet.</p>
-        ) : (
-          <ul className="flex flex-col gap-2 text-sm">
-            {runs.map((r) => (
-              <li
-                key={r.id}
-                className="flex items-center justify-between rounded-md border p-3"
+        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <h2 className="mb-4 text-sm font-semibold">Upload file</h2>
+          <form
+            action={async (formData) => {
+              "use server";
+              const { runId } = await uploadXlsx(formData);
+              redirect(`/settings/import/${runId}`);
+            }}
+            className="flex flex-col gap-4"
+          >
+            <input
+              type="file"
+              name="file"
+              accept=".xlsx"
+              required
+              className="text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary"
+            />
+            <div>
+              <button
+                type="submit"
+                className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-90 transition-opacity"
               >
-                <div className="flex flex-col">
-                  <span className="font-medium">{r.sourceFilename}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {r.startedAt.toISOString()} · {r.status}
-                  </span>
+                <Upload className="h-4 w-4" />
+                Upload &amp; stage
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-border">
+            <h2 className="text-sm font-semibold">Recent imports</h2>
+          </div>
+          {runs.length === 0 ? (
+            <p className="p-8 text-center text-sm text-muted-foreground">No imports yet.</p>
+          ) : (
+            <div className="divide-y divide-border">
+              {runs.map((r) => (
+                <div key={r.id} className="flex items-center justify-between px-5 py-3.5">
+                  <div>
+                    <p className="text-sm font-medium">{r.sourceFilename}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {r.startedAt.toISOString()} · {r.status}
+                    </p>
+                  </div>
+                  <Link
+                    href={`/settings/import/${r.id}`}
+                    className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/10 transition-colors"
+                  >
+                    Open
+                  </Link>
                 </div>
-                <Link
-                  href={`/settings/import/${r.id}`}
-                  className="text-sm text-primary underline"
-                >
-                  Open
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </main>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </AppShell>
   );
 }

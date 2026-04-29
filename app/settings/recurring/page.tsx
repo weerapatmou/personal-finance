@@ -6,6 +6,8 @@ import { eq } from "drizzle-orm";
 import { rrulestr } from "rrule";
 import { RuleRow } from "./rule-row";
 import { CreateRuleForm } from "./create-rule-form";
+import { AppShell } from "@/components/app-shell";
+import { BackButton } from "@/components/back-button";
 
 export default async function RecurringSettingsPage() {
   const session = await auth();
@@ -18,50 +20,57 @@ export default async function RecurringSettingsPage() {
     .where(eq(recurringRules.userId, userId));
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-8 p-4 sm:p-8">
-      <header>
-        <h1 className="text-2xl font-semibold">Recurring rules</h1>
-        <p className="text-sm text-muted-foreground">
-          Auto-populate budget lines or transactions on a schedule. Uses ICAL RRULE strings.
-        </p>
-      </header>
+    <AppShell>
+      <div className="p-6 sm:p-8 max-w-3xl mx-auto space-y-6">
+        <div className="pt-8 lg:pt-0 space-y-4">
+          <BackButton href="/" label="Dashboard" />
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Recurring Rules</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Auto-populate budget lines or transactions on a schedule using ICAL RRULE strings.
+            </p>
+          </div>
+        </div>
 
-      <section>
-        <h2 className="mb-2 text-lg font-medium">Active rules</h2>
-        {rules.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No rules yet.</p>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {rules.map((r) => {
-              let nextThree: string[] = [];
-              try {
-                const rule = rrulestr(r.rruleString);
-                nextThree = rule
-                  .all((d, i) => i < 3 && d > new Date())
-                  .map((d) => d.toISOString().slice(0, 10));
-              } catch {
-                nextThree = [];
-              }
-              return (
-                <RuleRow
-                  key={r.id}
-                  id={r.id}
-                  scope={r.scope}
-                  rruleString={r.rruleString}
-                  isActive={r.isActive}
-                  lastFiredAt={r.lastFiredAt?.toISOString() ?? null}
-                  nextThree={nextThree}
-                />
-              );
-            })}
-          </ul>
-        )}
-      </section>
+        <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-border">
+            <h2 className="text-sm font-semibold">Active Rules</h2>
+          </div>
+          {rules.length === 0 ? (
+            <p className="p-8 text-center text-sm text-muted-foreground">No rules yet.</p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {rules.map((r) => {
+                let nextThree: string[] = [];
+                try {
+                  const rule = rrulestr(r.rruleString);
+                  nextThree = rule
+                    .all((d, i) => i < 3 && d > new Date())
+                    .map((d) => d.toISOString().slice(0, 10));
+                } catch {
+                  nextThree = [];
+                }
+                return (
+                  <RuleRow
+                    key={r.id}
+                    id={r.id}
+                    scope={r.scope}
+                    rruleString={r.rruleString}
+                    isActive={r.isActive}
+                    lastFiredAt={r.lastFiredAt?.toISOString() ?? null}
+                    nextThree={nextThree}
+                  />
+                );
+              })}
+            </ul>
+          )}
+        </div>
 
-      <section>
-        <h2 className="mb-2 text-lg font-medium">Create rule</h2>
-        <CreateRuleForm />
-      </section>
-    </main>
+        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <h2 className="mb-4 text-sm font-semibold">Create Rule</h2>
+          <CreateRuleForm />
+        </div>
+      </div>
+    </AppShell>
   );
 }

@@ -1,18 +1,85 @@
-import { auth, signOut } from "@/lib/auth";
+import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import Link from "next/link";
+import { db } from "@/db";
+import { transactions, monthlyIncome } from "@/db/schema";
+import { eq, sql } from "drizzle-orm";
+import Decimal from "decimal.js";
+import { AppShell } from "@/components/app-shell";
 import { CurrencySelector } from "@/components/currency-selector";
+import {
+  Calendar,
+  TrendingUp,
+  BarChart2,
+  Receipt,
+  Clock,
+  Briefcase,
+  Upload,
+  RefreshCw,
+  ArrowUpRight,
+  ArrowDownRight,
+  Minus,
+  Bell,
+} from "lucide-react";
 
-const SECTIONS: Array<{ href: string; title: string; subtitle: string }> = [
-  { href: "/months", title: "Months", subtitle: "Plan vs Actual ledger per month" },
-  { href: "/portfolio", title: "Portfolio", subtitle: "Net worth + holdings" },
-  { href: "/analytics", title: "Analytics", subtitle: "Trends, top categories" },
-  { href: "/tax", title: "Tax planner", subtitle: "Thai PIT caps and headroom" },
-  { href: "/retirement", title: "Retirement", subtitle: "FIRE projection" },
-  { href: "/settings/import", title: "Import xlsx", subtitle: "Backfill historical sheets" },
-  { href: "/settings/recurring", title: "Recurring rules", subtitle: "Auto-populate budgets" },
-  { href: "/portfolio/holdings", title: "Holdings", subtitle: "Manage positions + transactions" },
+const QUICK_NAV = [
+  {
+    href: "/months",
+    label: "Months",
+    description: "Plan vs Actual ledger",
+    icon: Calendar,
+    color: "bg-violet-100 text-violet-600",
+  },
+  {
+    href: "/portfolio",
+    label: "Portfolio",
+    description: "Net worth + holdings",
+    icon: TrendingUp,
+    color: "bg-blue-100 text-blue-600",
+  },
+  {
+    href: "/analytics",
+    label: "Analytics",
+    description: "Trends & categories",
+    icon: BarChart2,
+    color: "bg-indigo-100 text-indigo-600",
+  },
+  {
+    href: "/tax",
+    label: "Tax Planner",
+    description: "Thai PIT headroom",
+    icon: Receipt,
+    color: "bg-amber-100 text-amber-600",
+  },
+  {
+    href: "/retirement",
+    label: "Retirement",
+    description: "FIRE projection",
+    icon: Clock,
+    color: "bg-emerald-100 text-emerald-600",
+  },
+  {
+    href: "/portfolio/holdings",
+    label: "Holdings",
+    description: "Manage positions",
+    icon: Briefcase,
+    color: "bg-sky-100 text-sky-600",
+  },
+  {
+    href: "/settings/import",
+    label: "Import",
+    description: "Upload XLSX sheets",
+    icon: Upload,
+    color: "bg-rose-100 text-rose-600",
+  },
+  {
+    href: "/settings/recurring",
+    label: "Recurring",
+    description: "Auto-populate budgets",
+    icon: RefreshCw,
+    color: "bg-teal-100 text-teal-600",
+  },
 ];
 
 export default async function HomePage() {
@@ -20,55 +87,181 @@ export default async function HomePage() {
   if (!session?.user) redirect("/login");
 
   const t = await getTranslations("Home");
-  const tCommon = await getTranslations("Common");
+  const userId = session.user.id;
+
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+
+  // Current month income
+  const [incomeRow] = await db
+    .select({ amount: monthlyIncome.amount })
+    .from(monthlyIncome)
+    .where(
+      sql`${monthlyIncome.userId} = ${userId} AND ${monthlyIncome.year} = ${year} AND ${monthlyIncome.month} = ${month}`,
+    )
+    .limit(1);
+
+  // Current month actual spending
+  const [spendRow] = await db
+    .select({
+      total: sql<string>`COALESCE(SUM(${transactions.amount}), 0)::text`,
+    })
+    .from(transactions)
+    .where(
+      sql`${transactions.userId} = ${userId} AND EXTRACT(YEAR FROM ${transactions.date}) = ${year} AND EXTRACT(MONTH FROM ${transactions.date}) = ${month}`,
+    );
+
+  // Latest portfolio net worth
+  const [netWorthRow] = await db.execute<{ value_base: string }>(sql`
+    SELECT COALESCE(SUM(value_base), 0)::text AS value_base
+    FROM (
+      SELECT DISTINCT ON (holding_id) value_base
+      FROM portfolio_daily
+      WHERE user_id = ${userId}
+      ORDER BY holding_id, date DESC
+    ) latest
+  `);
+
+  const income = new Decimal(incomeRow?.amount ?? "0");
+  const spend = new Decimal(spendRow?.total ?? "0");
+  const net = income.minus(spend);
+  const netWorth = new Decimal(netWorthRow?.value_base ?? "0");
+
+  const greeting = t("greeting", {
+    name: session.user.name ?? session.user.username ?? "",
+  });
+
+  const monthName = now.toLocaleString("en-US", { month: "long" });
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-4xl flex-col gap-8 p-6 sm:p-8">
-      <header className="flex flex-wrap items-start justify-between gap-4">
+    <AppShell>
+      <div className="p-6 sm:p-8 max-w-6xl mx-auto space-y-8">
+        {/* Header */}
+        <div className="flex flex-wrap items-start justify-between gap-4 pt-8 lg:pt-0">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">{greeting}</h1>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Here&apos;s your financial overview for {monthName} {year}
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button className="flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-card shadow-sm hover:bg-muted transition-colors" aria-label="Notifications">
+              <Bell className="h-4 w-4 text-muted-foreground" />
+            </button>
+            <div className="flex flex-col items-end gap-1">
+              <span className="text-xs text-muted-foreground">Display currency</span>
+              <CurrencySelector userId={userId} />
+            </div>
+          </div>
+        </div>
+
+        {/* Stat cards */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard
+            label="This Month Income"
+            value={fmt(income)}
+            icon={<ArrowUpRight className="h-4 w-4" />}
+            iconBg="bg-emerald-100 text-emerald-600"
+            trend={income.isZero() ? null : "up"}
+          />
+          <StatCard
+            label="This Month Spend"
+            value={fmt(spend)}
+            icon={<ArrowDownRight className="h-4 w-4" />}
+            iconBg="bg-rose-100 text-rose-600"
+            trend={spend.isZero() ? null : "down"}
+          />
+          <StatCard
+            label="Net Savings"
+            value={fmt(net)}
+            icon={<Minus className="h-4 w-4" />}
+            iconBg={net.isNegative() ? "bg-rose-100 text-rose-600" : "bg-blue-100 text-blue-600"}
+            valueColor={net.isNegative() ? "text-destructive" : "text-emerald-600"}
+            trend={null}
+          />
+          <StatCard
+            label="Portfolio Value"
+            value={fmt(netWorth)}
+            icon={<TrendingUp className="h-4 w-4" />}
+            iconBg="bg-violet-100 text-violet-600"
+            trend={netWorth.isZero() ? null : "up"}
+          />
+        </div>
+
+        {/* Quick navigation */}
         <div>
-          <h1 className="text-2xl font-semibold">
-            {t("greeting", { name: session.user.name ?? session.user.username ?? "" })}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            @{session.user.username}
-          </p>
+          <h2 className="mb-4 text-base font-semibold">Quick Access</h2>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {QUICK_NAV.map((item) => {
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="group flex items-start gap-4 rounded-2xl border border-border bg-card p-4 shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5"
+                >
+                  <div className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${item.color}`}>
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-sm group-hover:text-primary transition-colors">
+                      {item.label}
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground leading-relaxed">
+                      {item.description}
+                    </p>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
         </div>
-        <div className="flex flex-col items-end gap-2">
-          <span className="text-xs text-muted-foreground">{tCommon("displayCurrency")}</span>
-          <CurrencySelector userId={session.user.id} />
-        </div>
-      </header>
-
-      <section>
-        <h2 className="mb-3 text-lg font-medium">Sections</h2>
-        <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {SECTIONS.map((s) => (
-            <li key={s.href}>
-              <Link
-                href={s.href}
-                className="flex h-full flex-col gap-1 rounded-md border p-4 hover:bg-muted"
-              >
-                <span className="font-medium">{s.title}</span>
-                <span className="text-xs text-muted-foreground">{s.subtitle}</span>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <form
-        action={async () => {
-          "use server";
-          await signOut({ redirectTo: "/login" });
-        }}
-      >
-        <button
-          type="submit"
-          className="rounded-md border px-4 py-2 text-sm hover:bg-muted"
-        >
-          {tCommon("logout")}
-        </button>
-      </form>
-    </main>
+      </div>
+    </AppShell>
   );
+}
+
+function StatCard({
+  label,
+  value,
+  icon,
+  iconBg,
+  trend,
+  valueColor,
+}: {
+  label: string;
+  value: string;
+  icon: React.ReactNode;
+  iconBg: string;
+  trend: "up" | "down" | null;
+  valueColor?: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+      <div className="flex items-start justify-between">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</p>
+        <div className={`flex h-8 w-8 items-center justify-center rounded-xl ${iconBg}`}>
+          {icon}
+        </div>
+      </div>
+      <p className={`mt-3 text-2xl font-bold tracking-tight ${valueColor ?? "text-foreground"}`}>
+        {value}
+      </p>
+      {trend && (
+        <p className={`mt-1 text-xs font-medium ${trend === "up" ? "text-emerald-600" : "text-rose-600"}`}>
+          {trend === "up" ? "↑ This month" : "↓ This month"}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function fmt(d: Decimal): string {
+  return new Intl.NumberFormat("th-TH", {
+    style: "currency",
+    currency: "THB",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(d.toNumber());
 }

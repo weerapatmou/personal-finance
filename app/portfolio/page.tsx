@@ -7,13 +7,15 @@ import Link from "next/link";
 import Decimal from "decimal.js";
 import { replay } from "@/lib/cost-basis";
 import type { InvestmentTxInput, ReplayResult } from "@/lib/cost-basis";
+import { AppShell } from "@/components/app-shell";
+import { BackButton } from "@/components/back-button";
+import { Plus, AlertTriangle, TrendingUp, TrendingDown } from "lucide-react";
 
 export default async function PortfolioDashboard() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
   const userId = session.user.id;
 
-  // Latest PortfolioDaily per holding.
   const latestRows = await db.execute<{
     holding_id: string;
     date: string;
@@ -33,7 +35,6 @@ export default async function PortfolioDashboard() {
   const allHoldings = await db.select().from(holdings).where(eq(holdings.userId, userId));
   const allTxs = await db.select().from(investmentTxs).where(eq(investmentTxs.userId, userId));
 
-  // Per-holding cost basis (replay).
   const txByHolding = new Map<string, InvestmentTxInput[]>();
   for (const t of allTxs) {
     const arr = txByHolding.get(t.holdingId) ?? [];
@@ -112,95 +113,132 @@ export default async function PortfolioDashboard() {
   const staleHoldings = dashboardRows.filter((r) => r.isStale);
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 p-4 sm:p-8">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold">Portfolio</h1>
-        <Link
-          href="/portfolio/holdings/new"
-          className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground"
-        >
-          Add holding
-        </Link>
-      </header>
-
-      {staleHoldings.length > 0 && (
-        <div className="rounded-md border border-yellow-500/50 bg-yellow-500/10 p-3 text-sm">
-          <strong>Stale data:</strong> {staleHoldings.map((r) => r.name).join(", ")}
+    <AppShell>
+      <div className="p-6 sm:p-8 max-w-6xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="pt-8 lg:pt-0 space-y-4">
+          <BackButton href="/" label="Dashboard" />
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">Portfolio</h1>
+              <p className="text-sm text-muted-foreground mt-0.5">Net worth, holdings & allocation</p>
+            </div>
+            <Link
+              href="/portfolio/holdings/new"
+              className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:opacity-90 transition-opacity"
+            >
+              <Plus className="h-4 w-4" />
+              Add holding
+            </Link>
+          </div>
         </div>
-      )}
 
-      <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Stat label="Net Worth" value={fmt(totalNetWorth)} />
-        <Stat label="Holdings" value={String(dashboardRows.length)} />
-        <Stat label="Stale" value={String(staleHoldings.length)} />
-      </section>
+        {staleHoldings.length > 0 && (
+          <div className="flex items-start gap-3 rounded-2xl border border-amber-400/40 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <div>
+              <span className="font-semibold">Stale data: </span>
+              {staleHoldings.map((r) => r.name).join(", ")}
+            </div>
+          </div>
+        )}
 
-      <section>
-        <h2 className="mb-2 text-lg font-medium">Allocation</h2>
-        <ul className="flex flex-col gap-1 text-sm">
-          {allocation.map((a) => (
-            <li key={a.cls} className="flex items-center justify-between gap-3">
-              <span className="text-muted-foreground">{a.cls}</span>
-              <span className="font-mono">{a.pct.toFixed(2)}%</span>
-              <span>{fmt(a.val)}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
+        {/* Stat cards */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Net Worth</p>
+            <p className="mt-2 text-2xl font-bold">{fmt(totalNetWorth)}</p>
+          </div>
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Holdings</p>
+            <p className="mt-2 text-2xl font-bold">{dashboardRows.length}</p>
+          </div>
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Stale Prices</p>
+            <p className={`mt-2 text-2xl font-bold ${staleHoldings.length > 0 ? "text-amber-600" : "text-emerald-600"}`}>
+              {staleHoldings.length}
+            </p>
+          </div>
+        </div>
 
-      <section className="overflow-x-auto">
-        <h2 className="mb-2 text-lg font-medium">Holdings</h2>
-        <table className="w-full border-collapse text-sm">
-          <thead>
-            <tr className="border-b text-left text-muted-foreground">
-              <th className="py-2 pr-3">Name</th>
-              <th className="py-2 pr-3">Asset</th>
-              <th className="py-2 pr-3 text-right">Units</th>
-              <th className="py-2 pr-3 text-right">Avg cost</th>
-              <th className="py-2 pr-3 text-right">Price</th>
-              <th className="py-2 pr-3 text-right">Value (THB)</th>
-              <th className="py-2 pr-3 text-right">P&amp;L %</th>
-            </tr>
-          </thead>
-          <tbody>
-            {dashboardRows.map((r) => (
-              <tr key={r.id} className="border-b">
-                <td className="py-2 pr-3">
-                  <Link href={`/portfolio/holdings/${r.id}`} className="hover:underline">
-                    {r.name}
-                  </Link>
-                </td>
-                <td className="py-2 pr-3 text-muted-foreground">{r.assetClass}</td>
-                <td className="py-2 pr-3 text-right font-mono">{r.units.toFixed(4)}</td>
-                <td className="py-2 pr-3 text-right font-mono">{r.avgCost.toFixed(4)}</td>
-                <td className="py-2 pr-3 text-right font-mono">{r.currentPrice.toFixed(4)}</td>
-                <td className="py-2 pr-3 text-right font-mono">{fmt(r.valueBase)}</td>
-                <td
-                  className={`py-2 pr-3 text-right font-mono ${
-                    r.pnlPct?.greaterThanOrEqualTo(0)
-                      ? "text-emerald-600"
-                      : r.pnlPct
-                        ? "text-destructive"
-                        : ""
-                  }`}
-                >
-                  {r.pnlPct ? r.pnlPct.toFixed(2) + "%" : "—"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-    </main>
-  );
-}
+        {/* Allocation */}
+        {allocation.length > 0 && (
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+            <h2 className="mb-4 text-sm font-semibold">Allocation</h2>
+            <div className="space-y-3">
+              {allocation.map((a) => (
+                <div key={a.cls}>
+                  <div className="mb-1 flex items-center justify-between text-sm">
+                    <span className="font-medium">{a.cls}</span>
+                    <span className="text-muted-foreground">{fmt(a.val)} · {a.pct.toFixed(1)}%</span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-primary"
+                      style={{ width: `${a.pct.toNumber()}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border p-4">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="text-xl font-semibold">{value}</div>
-    </div>
+        {/* Holdings table */}
+        <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-border">
+            <h2 className="text-sm font-semibold">Holdings</h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/30">
+                  <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Name</th>
+                  <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">Asset</th>
+                  <th className="px-5 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">Units</th>
+                  <th className="px-5 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">Avg Cost</th>
+                  <th className="px-5 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">Price</th>
+                  <th className="px-5 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">Value (THB)</th>
+                  <th className="px-5 py-3 text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">P&amp;L %</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {dashboardRows.map((r) => {
+                  const isUp = r.pnlPct?.greaterThanOrEqualTo(0);
+                  return (
+                    <tr key={r.id} className="hover:bg-muted/30 transition-colors">
+                      <td className="px-5 py-3.5">
+                        <Link
+                          href={`/portfolio/holdings/${r.id}`}
+                          className="font-medium text-primary hover:underline"
+                        >
+                          {r.name}
+                        </Link>
+                      </td>
+                      <td className="px-5 py-3.5 text-muted-foreground">{r.assetClass}</td>
+                      <td className="px-5 py-3.5 text-right font-mono text-sm">{r.units.toFixed(4)}</td>
+                      <td className="px-5 py-3.5 text-right font-mono text-sm">{r.avgCost.toFixed(4)}</td>
+                      <td className="px-5 py-3.5 text-right font-mono text-sm">{r.currentPrice.toFixed(4)}</td>
+                      <td className="px-5 py-3.5 text-right font-mono text-sm">{fmt(r.valueBase)}</td>
+                      <td className="px-5 py-3.5 text-right">
+                        {r.pnlPct ? (
+                          <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-semibold ${isUp ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>
+                            {isUp ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                            {r.pnlPct.toFixed(2)}%
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </AppShell>
   );
 }
 
