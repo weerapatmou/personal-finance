@@ -43,44 +43,6 @@ export const transactionTypeEnum = pgEnum("transaction_type", ["EXPENSE", "TRANS
 
 export const recurringScopeEnum = pgEnum("recurring_scope", ["BUDGET_LINE", "TRANSACTION"]);
 
-export const assetClassEnum = pgEnum("asset_class", [
-  "STOCK",
-  "ETF",
-  "CRYPTO",
-  "GOLD",
-  "FUND",
-  "CASH",
-  "PF",
-  "OTHER",
-  "EMERGENCY_FUND",
-]);
-
-export const unitTypeEnum = pgEnum("unit_type", [
-  "SHARES",
-  "COINS",
-  "BAHT_WEIGHT",
-  "TROY_OZ",
-  "THB",
-  "USD",
-]);
-
-export const quoteSourceEnum = pgEnum("quote_source", [
-  "YAHOO",
-  "GOLDTRADERS_TH",
-  "MANUAL_NAV",
-  "NONE",
-]);
-
-export const investmentTxTypeEnum = pgEnum("investment_tx_type", [
-  "BUY",
-  "SELL",
-  "DIVIDEND",
-  "FEE",
-  "SPLIT",
-  "TRANSFER_IN",
-  "TRANSFER_OUT",
-]);
-
 export const importStatusEnum = pgEnum("import_status", [
   "STAGED",
   "MAPPING",
@@ -298,153 +260,7 @@ export const transactions = pgTable(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 4. Investments (per SPEC §2.5)
-// ─────────────────────────────────────────────────────────────────────────────
-
-export const holdings = pgTable("holdings", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  accountId: uuid("account_id")
-    .notNull()
-    .references(() => accounts.id, { onDelete: "restrict" }),
-  assetClass: assetClassEnum("asset_class").notNull(),
-  symbol: varchar("symbol", { length: 64 }),
-  name: varchar("name", { length: 200 }).notNull(),
-  nativeCurrency: varchar("native_currency", { length: 3 }).notNull(),
-  unitType: unitTypeEnum("unit_type").notNull().default("SHARES"),
-  quoteSource: quoteSourceEnum("quote_source").notNull().default("YAHOO"),
-  notes: text("notes"),
-  isArchived: boolean("is_archived").notNull().default(false),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
-
-export const currencyConverts = pgTable("currency_converts", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  accountId: uuid("account_id")
-    .notNull()
-    .references(() => accounts.id, { onDelete: "restrict" }),
-  date: date("date").notNull(),
-  fromCurrency: varchar("from_currency", { length: 3 }).notNull(),
-  fromAmount: numeric("from_amount", { precision: 18, scale: 4 }).notNull(),
-  toCurrency: varchar("to_currency", { length: 3 }).notNull(),
-  toAmount: numeric("to_amount", { precision: 18, scale: 4 }).notNull(),
-  effectiveRate: numeric("effective_rate", { precision: 18, scale: 8 }).notNull(),
-  feesNative: numeric("fees_native", { precision: 18, scale: 4 }).notNull().default("0"),
-  note: text("note"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
-
-export const investmentTxs = pgTable("investment_txs", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  holdingId: uuid("holding_id")
-    .notNull()
-    .references(() => holdings.id, { onDelete: "cascade" }),
-  date: date("date").notNull(),
-  type: investmentTxTypeEnum("type").notNull(),
-  units: numeric("units", { precision: 28, scale: 10 }),
-  priceNative: numeric("price_native", { precision: 18, scale: 8 }),
-  feesNative: numeric("fees_native", { precision: 18, scale: 4 }).notNull().default("0"),
-  amountNative: numeric("amount_native", { precision: 18, scale: 4 }),
-  currencyConvertId: uuid("currency_convert_id").references(() => currencyConverts.id, {
-    onDelete: "set null",
-  }),
-  splitRatio: numeric("split_ratio", { precision: 10, scale: 6 }),
-  note: text("note"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
-
-export const realizations = pgTable("realizations", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  holdingId: uuid("holding_id")
-    .notNull()
-    .references(() => holdings.id, { onDelete: "cascade" }),
-  sellTxId: uuid("sell_tx_id")
-    .notNull()
-    .references(() => investmentTxs.id, { onDelete: "cascade" }),
-  date: date("date").notNull(),
-  units: numeric("units", { precision: 28, scale: 10 }).notNull(),
-  proceedsNative: numeric("proceeds_native", { precision: 18, scale: 4 }).notNull(),
-  costBasisNative: numeric("cost_basis_native", { precision: 18, scale: 4 }).notNull(),
-  realizedNative: numeric("realized_native", { precision: 18, scale: 4 }).notNull(),
-  fxToBase: numeric("fx_to_base", { precision: 18, scale: 8 }).notNull(),
-  realizedBase: numeric("realized_base", { precision: 18, scale: 4 }).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 5. Prices, FX, and the daily portfolio view (per SPEC §2.6)
-// ─────────────────────────────────────────────────────────────────────────────
-
-export const priceCache = pgTable(
-  "price_cache",
-  {
-    symbol: varchar("symbol", { length: 64 }).notNull(),
-    date: date("date").notNull(),
-    quoteCurrency: varchar("quote_currency", { length: 3 }).notNull(),
-    open: numeric("open", { precision: 18, scale: 8 }),
-    high: numeric("high", { precision: 18, scale: 8 }),
-    low: numeric("low", { precision: 18, scale: 8 }),
-    close: numeric("close", { precision: 18, scale: 8 }).notNull(),
-    source: varchar("source", { length: 32 }).notNull(),
-    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => ({
-    pk: primaryKey({ columns: [t.symbol, t.date] }),
-  }),
-);
-
-export const fxRates = pgTable(
-  "fx_rates",
-  {
-    date: date("date").notNull(),
-    base: varchar("base", { length: 3 }).notNull(),
-    quote: varchar("quote", { length: 3 }).notNull(),
-    rate: numeric("rate", { precision: 18, scale: 8 }).notNull(),
-    source: varchar("source", { length: 32 }).notNull(),
-  },
-  (t) => ({
-    pk: primaryKey({ columns: [t.date, t.base, t.quote] }),
-  }),
-);
-
-export const portfolioDaily = pgTable(
-  "portfolio_daily",
-  {
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    date: date("date").notNull(),
-    holdingId: uuid("holding_id")
-      .notNull()
-      .references(() => holdings.id, { onDelete: "cascade" }),
-    unitsHeld: numeric("units_held", { precision: 28, scale: 10 }).notNull(),
-    priceNative: numeric("price_native", { precision: 18, scale: 8 }).notNull(),
-    priceCurrency: varchar("price_currency", { length: 3 }).notNull(),
-    fxToBase: numeric("fx_to_base", { precision: 18, scale: 8 }).notNull(),
-    valueBase: numeric("value_base", { precision: 18, scale: 4 }).notNull(),
-    isStale: boolean("is_stale").notNull().default(false),
-    computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => ({
-    pk: primaryKey({ columns: [t.userId, t.date, t.holdingId] }),
-  }),
-);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 6. Importer staging (per SPEC §7)
+// 4. Importer staging (per SPEC §7)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const importRuns = pgTable("import_runs", {
@@ -586,7 +402,6 @@ export const usersRelations = relations(users, ({ many }) => ({
   categories: many(categories),
   budgetLines: many(budgetLines),
   transactions: many(transactions),
-  holdings: many(holdings),
 }));
 
 export const transactionsRelations = relations(transactions, ({ one }) => ({
@@ -596,20 +411,6 @@ export const transactionsRelations = relations(transactions, ({ one }) => ({
   budgetLine: one(budgetLines, {
     fields: [transactions.budgetLineId],
     references: [budgetLines.id],
-  }),
-}));
-
-export const holdingsRelations = relations(holdings, ({ one, many }) => ({
-  user: one(users, { fields: [holdings.userId], references: [users.id] }),
-  account: one(accounts, { fields: [holdings.accountId], references: [accounts.id] }),
-  txs: many(investmentTxs),
-}));
-
-export const investmentTxsRelations = relations(investmentTxs, ({ one }) => ({
-  holding: one(holdings, { fields: [investmentTxs.holdingId], references: [holdings.id] }),
-  currencyConvert: one(currencyConverts, {
-    fields: [investmentTxs.currencyConvertId],
-    references: [currencyConverts.id],
   }),
 }));
 
@@ -625,14 +426,6 @@ export type BudgetLine = typeof budgetLines.$inferSelect;
 export type MonthlyIncomeRow = typeof monthlyIncome.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
 export type RecurringRule = typeof recurringRules.$inferSelect;
-export type Holding = typeof holdings.$inferSelect;
-export type InvestmentTx = typeof investmentTxs.$inferSelect;
-export type NewInvestmentTx = typeof investmentTxs.$inferInsert;
-export type CurrencyConvert = typeof currencyConverts.$inferSelect;
-export type Realization = typeof realizations.$inferSelect;
-export type PriceCacheRow = typeof priceCache.$inferSelect;
-export type FxRate = typeof fxRates.$inferSelect;
-export type PortfolioDailyRow = typeof portfolioDaily.$inferSelect;
 export type ImportRun = typeof importRuns.$inferSelect;
 export type ImportStagingRow = typeof importStaging.$inferSelect;
 export type CategoryAlias = typeof categoryAliases.$inferSelect;

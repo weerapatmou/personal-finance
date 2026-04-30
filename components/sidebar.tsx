@@ -6,9 +6,7 @@ import { useState } from "react";
 import {
   LayoutDashboard,
   Calendar,
-  TrendingUp,
   BarChart2,
-  Briefcase,
   LogOut,
   Menu,
   X,
@@ -25,9 +23,7 @@ type NavItem = {
 const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Overview", icon: LayoutDashboard, exact: true },
   { href: "/months", label: "Months", icon: Calendar },
-  { href: "/portfolio", label: "Portfolio", icon: TrendingUp, exact: true },
   { href: "/analytics", label: "Analytics", icon: BarChart2 },
-  { href: "/portfolio/holdings", label: "Holdings", icon: Briefcase },
 ];
 
 interface SidebarProps {

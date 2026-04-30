@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import Link from "next/link";
 import { db } from "@/db";
-import { transactions, monthlyIncome } from "@/db/schema";
+import { monthlyIncome } from "@/db/schema";
 import { sql } from "drizzle-orm";
 import Decimal from "decimal.js";
 import { AppShell } from "@/components/app-shell";
@@ -11,9 +11,7 @@ import { CurrencySelector } from "@/components/currency-selector";
 import { YearSelector } from "./year-selector";
 import {
   Calendar,
-  TrendingUp,
   BarChart2,
-  Briefcase,
   ArrowUpRight,
   ArrowDownRight,
   Minus,
@@ -28,25 +26,11 @@ const QUICK_NAV = [
     color: "bg-violet-100 text-violet-600",
   },
   {
-    href: "/portfolio",
-    label: "Portfolio",
-    description: "Net worth + holdings",
-    icon: TrendingUp,
-    color: "bg-blue-100 text-blue-600",
-  },
-  {
     href: "/analytics",
     label: "Analytics",
     description: "Trends & categories",
     icon: BarChart2,
     color: "bg-indigo-100 text-indigo-600",
-  },
-  {
-    href: "/portfolio/holdings",
-    label: "Holdings",
-    description: "Manage positions",
-    icon: Briefcase,
-    color: "bg-sky-100 text-sky-600",
   },
 ];
 
@@ -71,9 +55,7 @@ export default async function OverviewPage({ searchParams }: OverviewPageProps) 
   const years = Array.from({ length: 6 }, (_, i) => currentYear - i);
   if (!years.includes(year)) years.unshift(year);
 
-  const yearEnd = `${year}-12-31`;
-
-  const [t, incomeResult, spendResult, netWorthResult] = await Promise.all([
+  const [t, incomeResult, spendResult] = await Promise.all([
     getTranslations("Home"),
     db
       .select({
@@ -81,40 +63,32 @@ export default async function OverviewPage({ searchParams }: OverviewPageProps) 
       })
       .from(monthlyIncome)
       .where(sql`${monthlyIncome.userId} = ${userId} AND ${monthlyIncome.year} = ${year}`),
-    db
-      .select({
-        total: sql<string>`COALESCE(SUM(${transactions.amount}), 0)::text`,
-      })
-      .from(transactions)
-      .where(
-        sql`${transactions.userId} = ${userId} AND EXTRACT(YEAR FROM ${transactions.date}) = ${year}`,
-      ),
-    db.execute<{ value_base: string }>(sql`
-      SELECT COALESCE(SUM(value_base), 0)::text AS value_base
-      FROM (
-        SELECT DISTINCT ON (holding_id) value_base
-        FROM portfolio_daily
-        WHERE user_id = ${userId} AND date <= ${yearEnd}
-        ORDER BY holding_id, date DESC
-      ) latest
+    db.execute<{ total: string }>(sql`
+      SELECT (
+        (SELECT COALESCE(SUM(manual_actual), 0)
+           FROM budget_lines
+           WHERE user_id = ${userId} AND year = ${year} AND manual_actual IS NOT NULL)
+        +
+        (SELECT COALESCE(SUM(t.amount), 0)
+           FROM transactions t
+           LEFT JOIN budget_lines bl ON t.budget_line_id = bl.id
+           WHERE t.user_id = ${userId}
+             AND EXTRACT(YEAR FROM t.date) = ${year}
+             AND bl.manual_actual IS NULL)
+      )::text AS total
     `),
   ]);
 
   const [incomeRow] = incomeResult;
   const [spendRow] = spendResult;
-  const [netWorthRow] = netWorthResult;
 
   const income = new Decimal(incomeRow?.total ?? "0");
   const spend = new Decimal(spendRow?.total ?? "0");
   const net = income.minus(spend);
-  const netWorth = new Decimal(netWorthRow?.value_base ?? "0");
 
   const greeting = t("greeting", {
     name: session.user.name ?? session.user.username ?? "",
   });
-
-  const isCurrentYear = year === currentYear;
-  const portfolioLabel = isCurrentYear ? "Portfolio Value" : `Portfolio Value (end of ${year})`;
 
   return (
     <AppShell>
@@ -140,7 +114,7 @@ export default async function OverviewPage({ searchParams }: OverviewPageProps) 
         </div>
 
         {/* Stat cards */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <StatCard
             label={`${year} Income`}
             value={fmt(income)}
@@ -163,19 +137,12 @@ export default async function OverviewPage({ searchParams }: OverviewPageProps) 
             valueColor={net.isNegative() ? "text-destructive" : "text-emerald-600"}
             trend={null}
           />
-          <StatCard
-            label={portfolioLabel}
-            value={fmt(netWorth)}
-            icon={<TrendingUp className="h-4 w-4" />}
-            iconBg="bg-violet-100 text-violet-600"
-            trend={netWorth.isZero() ? null : "up"}
-          />
         </div>
 
         {/* Quick navigation */}
         <div>
           <h2 className="mb-4 text-base font-semibold">Quick Access</h2>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {QUICK_NAV.map((item) => {
               const Icon = item.icon;
               return (
