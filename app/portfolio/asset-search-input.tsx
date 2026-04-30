@@ -17,6 +17,7 @@ export function AssetSearchInput({ category, placeholder, onSelect }: Props) {
   const [results, setResults] = useState<AssetSearchHit[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [open, setOpen] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -35,6 +36,7 @@ export function AssetSearchInput({ category, placeholder, onSelect }: Props) {
 
   function onChange(q: string) {
     setQuery(q);
+    setErrorMsg(null);
     if (timerRef.current) clearTimeout(timerRef.current);
     if (q.trim().length < 1) {
       setResults([]);
@@ -48,12 +50,26 @@ export function AssetSearchInput({ category, placeholder, onSelect }: Props) {
         const res = await fetch(
           `/api/asset-search?q=${encodeURIComponent(q)}&category=${category}`,
         );
+        if (res.status === 429) {
+          const body = (await res.json()) as { error?: string };
+          setResults([]);
+          setOpen(false);
+          setErrorMsg(body.error ?? "Rate limited. Try again in a few minutes.");
+          return;
+        }
+        if (!res.ok) {
+          setResults([]);
+          setOpen(false);
+          setErrorMsg("Search failed. Try again.");
+          return;
+        }
         const data: AssetSearchHit[] = await res.json();
         setResults(data);
         setOpen(data.length > 0);
       } catch {
         setResults([]);
         setOpen(false);
+        setErrorMsg("Network error. Try again.");
       } finally {
         setIsSearching(false);
       }
@@ -76,6 +92,9 @@ export function AssetSearchInput({ category, placeholder, onSelect }: Props) {
         placeholder={placeholder}
         className="w-full rounded-xl border border-border bg-background py-2.5 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
       />
+      {errorMsg && !isSearching && (
+        <p className="mt-1.5 text-xs text-amber-700">{errorMsg}</p>
+      )}
       {open && results.length > 0 && (
         <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-xl border border-border bg-background shadow-lg">
           {results.map((r) => (

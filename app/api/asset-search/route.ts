@@ -1,5 +1,5 @@
 import { auth } from "@/lib/auth";
-import { searchSymbols } from "@/lib/prices/yahoo";
+import { searchSymbols, YahooRateLimitError } from "@/lib/prices/yahoo";
 import { searchCoins } from "@/lib/prices/coingecko";
 
 // Unified search proxy. The wizard's autocomplete hits this single endpoint
@@ -34,16 +34,23 @@ export async function GET(req: Request) {
   if (q.length < 1) return Response.json([]);
 
   if (category === "stock") {
-    const results = await searchSymbols(q);
-    const hits: AssetSearchHit[] = results.map((r) => ({
-      kind: "stock",
-      symbol: r.symbol,
-      name: r.name,
-      exchange: r.exchange,
-      currency: r.currency,
-      type: r.type,
-    }));
-    return Response.json(hits);
+    try {
+      const results = await searchSymbols(q);
+      const hits: AssetSearchHit[] = results.map((r) => ({
+        kind: "stock",
+        symbol: r.symbol,
+        name: r.name,
+        exchange: r.exchange,
+        currency: r.currency,
+        type: r.type,
+      }));
+      return Response.json(hits);
+    } catch (e) {
+      if (e instanceof YahooRateLimitError) {
+        return Response.json({ error: e.message }, { status: 429 });
+      }
+      throw e;
+    }
   }
 
   if (category === "crypto") {
