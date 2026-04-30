@@ -10,9 +10,9 @@ import { BackButton } from "@/components/back-button";
 import { Plus } from "lucide-react";
 import { CategoryPieChart } from "./category-pie-chart";
 import { RefreshPricesButton } from "./refresh-prices-button";
-import { HoldingRowActions } from "./holding-row";
+import { CategorySection } from "./category-section";
+import type { AssetRow, ManualRow, CategorySectionData } from "./category-section";
 import { convertToUsdThb, sumValues } from "@/lib/portfolio/value";
-import type { ValuePair } from "@/lib/portfolio/value";
 import type { Currency } from "@/lib/money";
 
 // 6 display categories shown on the dashboard. Stock/Crypto/Gold come from
@@ -68,39 +68,13 @@ export default async function PortfolioDashboard() {
     });
   }
 
-  type AssetRow = {
-    kind: "asset";
-    id: string;
-    category: string;
-    displayName: string;
-    symbol: string;
-    units: Decimal;
-    nativePrice: Decimal | null;
-    nativeCurrency: Currency;
-    value: ValuePair;
-    priceAsOf: Date | null;
-  };
-  type ManualRow = {
-    kind: "manual";
-    id: string;
-    category: string;
-    name: string;
-    amount: Decimal;
-    currency: Currency;
-    value: ValuePair;
-  };
-
   const assetRows: AssetRow[] = assets.map((h) => {
     const cached = priceMap.get(priceKey(h.symbol, h.quoteSource));
     const price = cached?.price ?? null;
     const priceCurrency: Currency = cached?.currency ?? (h.quoteCurrency === "THB" ? "THB" : "USD");
     const units = new Decimal(h.units);
     const nativeValue = price ? units.times(price) : new Decimal(0);
-    const value = convertToUsdThb(
-      nativeValue,
-      priceCurrency,
-      usdThbRate,
-    );
+    const value = convertToUsdThb(nativeValue, priceCurrency, usdThbRate);
     return {
       kind: "asset",
       id: h.id,
@@ -111,7 +85,6 @@ export default async function PortfolioDashboard() {
       nativePrice: price,
       nativeCurrency: priceCurrency,
       value,
-      priceAsOf: cached?.asOf ?? null,
     };
   });
 
@@ -130,16 +103,24 @@ export default async function PortfolioDashboard() {
     };
   });
 
-  // Build the per-category breakdown.
-  const categoryRows = DISPLAY_CATEGORIES.map((c) => {
+  // Build the per-category breakdown, sorted by THB value descending.
+  // `sections` carries full holdings (for the per-category cards); `categoryRows`
+  // is the trimmed view used by the top allocation summary table + main pie.
+  const sections: CategorySectionData[] = DISPLAY_CATEGORIES.map((c) => {
     const isAsset = c.matches[0]!.kind === "asset";
     const target = c.matches[0]!.value;
-    const items = isAsset
+    const items: Array<AssetRow | ManualRow> = isAsset
       ? assetRows.filter((r) => r.category === target)
       : manualRows.filter((r) => r.category === target);
     const total = sumValues(items.map((i) => i.value));
-    return { label: c.label, color: c.color, total, count: items.length };
-  });
+    return { label: c.label, color: c.color, total, holdings: items };
+  }).sort((a, b) => b.total.thb.comparedTo(a.total.thb));
+  const categoryRows = sections.map((s) => ({
+    label: s.label,
+    color: s.color,
+    total: s.total,
+    count: s.holdings.length,
+  }));
 
   const grand = sumValues([...assetRows.map((r) => r.value), ...manualRows.map((r) => r.value)]);
 
@@ -207,7 +188,6 @@ export default async function PortfolioDashboard() {
                 <tr className="border-b border-border bg-muted/30 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   <th className="px-5 py-2.5 text-left">Category</th>
                   <th className="px-5 py-2.5 text-right">Value (THB)</th>
-                  <th className="px-5 py-2.5 text-right">Value (USD)</th>
                   <th className="px-5 py-2.5 text-right">%</th>
                 </tr>
               </thead>
@@ -225,7 +205,6 @@ export default async function PortfolioDashboard() {
                         </span>
                       </td>
                       <td className="px-5 py-3 text-right font-mono">{fmtTHB(c.total.thb)}</td>
-                      <td className="px-5 py-3 text-right font-mono">{fmtUSD(c.total.usd)}</td>
                       <td className="px-5 py-3 text-right text-muted-foreground">{pct.toFixed(2)}%</td>
                     </tr>
                   );
@@ -233,7 +212,6 @@ export default async function PortfolioDashboard() {
                 <tr className="bg-muted/30 font-semibold">
                   <td className="px-5 py-3">Total</td>
                   <td className="px-5 py-3 text-right font-mono">{fmtTHB(grand.thb)}</td>
-                  <td className="px-5 py-3 text-right font-mono">{fmtUSD(grand.usd)}</td>
                   <td className="px-5 py-3 text-right text-muted-foreground">100.00%</td>
                 </tr>
               </tbody>
@@ -246,83 +224,18 @@ export default async function PortfolioDashboard() {
           </div>
         </div>
 
-        {/* Holdings detail */}
-        <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
-          <div className="border-b border-border px-5 py-4">
-            <h2 className="text-sm font-semibold">Holdings</h2>
+        {/* Per-category sections (chart + table per category) */}
+        {sections.every((s) => s.holdings.length === 0) ? (
+          <div className="rounded-2xl border border-dashed border-border bg-card p-12 text-center text-sm text-muted-foreground">
+            No holdings yet. Click <span className="font-medium">Add holding</span> to start.
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/30 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  <th className="px-5 py-3 text-left">Name</th>
-                  <th className="px-5 py-3 text-left">Type</th>
-                  <th className="px-5 py-3 text-right">Units / Amount</th>
-                  <th className="px-5 py-3 text-right">Price</th>
-                  <th className="px-5 py-3 text-right">Value (USD)</th>
-                  <th className="px-5 py-3 text-right">Value (THB)</th>
-                  <th className="px-5 py-3 text-right w-32">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {assetRows.length === 0 && manualRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="px-5 py-12 text-center text-muted-foreground">
-                      No holdings yet. Click <span className="font-medium">Add holding</span> to start.
-                    </td>
-                  </tr>
-                ) : (
-                  <>
-                    {assetRows.map((r) => (
-                      <tr key={r.id} className="hover:bg-muted/30 transition-colors">
-                        <td className="px-5 py-3">
-                          <p className="font-medium">{r.displayName}</p>
-                          <p className="mt-0.5 text-xs text-muted-foreground">{r.symbol}</p>
-                        </td>
-                        <td className="px-5 py-3 text-muted-foreground">{r.category}</td>
-                        <td className="px-5 py-3 text-right font-mono">{r.units.toFixed(4)}</td>
-                        <td className="px-5 py-3 text-right font-mono">
-                          {r.nativePrice
-                            ? `${r.nativePrice.toFixed(2)} ${r.nativeCurrency}`
-                            : "—"}
-                        </td>
-                        <td className="px-5 py-3 text-right font-mono">{fmtUSD(r.value.usd)}</td>
-                        <td className="px-5 py-3 text-right font-mono font-semibold">{fmtTHB(r.value.thb)}</td>
-                        <td className="px-2 py-3 text-right">
-                          <HoldingRowActions kind="asset" id={r.id} units={r.units.toFixed(8)} />
-                        </td>
-                      </tr>
-                    ))}
-                    {manualRows.map((r) => (
-                      <tr key={r.id} className="hover:bg-muted/30 transition-colors">
-                        <td className="px-5 py-3">
-                          <p className="font-medium">{r.name}</p>
-                          <p className="mt-0.5 text-xs text-muted-foreground">manual</p>
-                        </td>
-                        <td className="px-5 py-3 text-muted-foreground">{labelFor(r.category)}</td>
-                        <td className="px-5 py-3 text-right font-mono">
-                          {r.amount.toFixed(2)} {r.currency}
-                        </td>
-                        <td className="px-5 py-3 text-right text-muted-foreground">—</td>
-                        <td className="px-5 py-3 text-right font-mono">{fmtUSD(r.value.usd)}</td>
-                        <td className="px-5 py-3 text-right font-mono font-semibold">{fmtTHB(r.value.thb)}</td>
-                        <td className="px-2 py-3 text-right">
-                          <HoldingRowActions
-                            kind="manual"
-                            id={r.id}
-                            name={r.name}
-                            amount={r.amount.toFixed(2)}
-                            currency={r.currency}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </>
-                )}
-              </tbody>
-            </table>
+        ) : (
+          <div className="space-y-5">
+            {sections
+              .filter((s) => s.holdings.length > 0)
+              .map((s) => <CategorySection key={s.label} section={s} />)}
           </div>
-        </div>
+        )}
       </div>
     </AppShell>
   );
@@ -392,11 +305,3 @@ function formatRelative(d: Date): string {
   return `${day} day${day === 1 ? "" : "s"} ago`;
 }
 
-function labelFor(cat: string): string {
-  switch (cat) {
-    case "PF": return "Provident Fund";
-    case "CASH": return "Cash";
-    case "EMERGENCY_FUND": return "Emergency Fund";
-    default: return cat;
-  }
-}
