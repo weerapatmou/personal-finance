@@ -57,6 +57,13 @@
       "when": 1777454100000,
       "tag": "0007_emergency_fund_asset_class",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1777455000000,
+      "tag": "0008_portfolio_redesign",
+      "breakpoints": true
     }
   ]
 }

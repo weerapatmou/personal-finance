@@ -1,6 +1,7 @@
 import {
   boolean,
   date,
+  index,
   integer,
   jsonb,
   numeric,
@@ -64,6 +65,18 @@ export const backupStatusEnum = pgEnum("backup_status", [
   "OK",
   "FAILED",
   "SKIPPED",
+]);
+
+export const assetCategoryEnum = pgEnum("asset_category", ["STOCK", "CRYPTO", "GOLD"]);
+export const manualCategoryEnum = pgEnum("manual_category", [
+  "PF",
+  "CASH",
+  "EMERGENCY_FUND",
+]);
+export const assetQuoteSourceEnum = pgEnum("asset_quote_source", [
+  "YAHOO",
+  "COINGECKO",
+  "GOLDTRADERS_TH",
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -327,7 +340,90 @@ export const categoryAliases = pgTable(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 7. Backups
+// 7. Portfolio (redesign — see plan: portfolio-and-holding-mutable-dongarra)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Quantity-tracked holdings: Stock / Crypto / Gold. The (user, category, symbol)
+// uniqueness lets the wizard "add to existing" via INSERT ... ON CONFLICT.
+export const assetHoldings = pgTable(
+  "asset_holdings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    category: assetCategoryEnum("category").notNull(),
+    symbol: varchar("symbol", { length: 64 }).notNull(),
+    displayName: varchar("display_name", { length: 200 }).notNull(),
+    quoteSource: assetQuoteSourceEnum("quote_source").notNull(),
+    quoteCurrency: varchar("quote_currency", { length: 3 }).notNull(),
+    units: numeric("units", { precision: 28, scale: 10 }).notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userCatSymbolUniq: uniqueIndex("asset_holdings_user_category_symbol_idx").on(
+      t.userId,
+      t.category,
+      t.symbol,
+    ),
+    userIdx: index("asset_holdings_user_id_idx").on(t.userId),
+  }),
+);
+
+// Manual holdings: PF / Cash / Emergency Fund. Free-form name + amount + currency.
+export const manualHoldings = pgTable(
+  "manual_holdings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    category: manualCategoryEnum("category").notNull(),
+    name: varchar("name", { length: 200 }).notNull(),
+    amount: numeric("amount", { precision: 18, scale: 4 }).notNull(),
+    currency: varchar("currency", { length: 3 }).notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index("manual_holdings_user_id_idx").on(t.userId),
+  }),
+);
+
+// Latest spot price per (symbol, source). No history — see plan rationale.
+export const assetPrices = pgTable(
+  "asset_prices",
+  {
+    symbol: varchar("symbol", { length: 64 }).notNull(),
+    source: assetQuoteSourceEnum("source").notNull(),
+    price: numeric("price", { precision: 18, scale: 8 }).notNull(),
+    currency: varchar("currency", { length: 3 }).notNull(),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.symbol, t.source] }),
+  }),
+);
+
+// Latest FX rate per (base, quote) pair.
+export const currencyRates = pgTable(
+  "currency_rates",
+  {
+    base: varchar("base", { length: 3 }).notNull(),
+    quote: varchar("quote", { length: 3 }).notNull(),
+    rate: numeric("rate", { precision: 18, scale: 8 }).notNull(),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.base, t.quote] }),
+  }),
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 8. Backups
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const backupExports = pgTable("backup_exports", {
@@ -432,6 +528,15 @@ export type CategoryAlias = typeof categoryAliases.$inferSelect;
 export type BackupExport = typeof backupExports.$inferSelect;
 export type BudgetLineDetail = typeof budgetLineDetails.$inferSelect;
 export type NewBudgetLineDetail = typeof budgetLineDetails.$inferInsert;
+export type AssetHolding = typeof assetHoldings.$inferSelect;
+export type NewAssetHolding = typeof assetHoldings.$inferInsert;
+export type ManualHolding = typeof manualHoldings.$inferSelect;
+export type NewManualHolding = typeof manualHoldings.$inferInsert;
+export type AssetPriceRow = typeof assetPrices.$inferSelect;
+export type CurrencyRateRow = typeof currencyRates.$inferSelect;
+export type AssetCategory = (typeof assetCategoryEnum.enumValues)[number];
+export type ManualCategory = (typeof manualCategoryEnum.enumValues)[number];
+export type AssetQuoteSource = (typeof assetQuoteSourceEnum.enumValues)[number];
 
 // `sql` is imported solely for use by drizzle-kit when introspecting; reference it
 // here so that future migrations or raw queries have a stable import path.

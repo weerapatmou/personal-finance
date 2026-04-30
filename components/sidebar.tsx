@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   Calendar,
   BarChart2,
+  TrendingUp,
   LogOut,
   Menu,
   X,
@@ -24,6 +25,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Overview", icon: LayoutDashboard, exact: true },
   { href: "/months", label: "Months", icon: Calendar },
   { href: "/analytics", label: "Analytics", icon: BarChart2 },
+  { href: "/portfolio", label: "Portfolio", icon: TrendingUp },
 ];
 
 interface SidebarProps {

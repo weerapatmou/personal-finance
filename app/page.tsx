@@ -3,15 +3,24 @@ import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import Link from "next/link";
 import { db } from "@/db";
-import { monthlyIncome } from "@/db/schema";
-import { sql } from "drizzle-orm";
+import {
+  monthlyIncome,
+  assetHoldings,
+  manualHoldings,
+  assetPrices,
+  currencyRates,
+} from "@/db/schema";
+import { eq, sql } from "drizzle-orm";
 import Decimal from "decimal.js";
 import { AppShell } from "@/components/app-shell";
 import { CurrencySelector } from "@/components/currency-selector";
 import { YearSelector } from "./year-selector";
+import { convertToUsdThb, sumValues } from "@/lib/portfolio/value";
+import type { Currency } from "@/lib/money";
 import {
   Calendar,
   BarChart2,
+  TrendingUp,
   ArrowUpRight,
   ArrowDownRight,
   Minus,
@@ -31,6 +40,13 @@ const QUICK_NAV = [
     description: "Trends & categories",
     icon: BarChart2,
     color: "bg-indigo-100 text-indigo-600",
+  },
+  {
+    href: "/portfolio",
+    label: "Portfolio",
+    description: "Holdings & current value",
+    icon: TrendingUp,
+    color: "bg-blue-100 text-blue-600",
   },
 ];
 
@@ -55,7 +71,7 @@ export default async function OverviewPage({ searchParams }: OverviewPageProps) 
   const years = Array.from({ length: 6 }, (_, i) => currentYear - i);
   if (!years.includes(year)) years.unshift(year);
 
-  const [t, incomeResult, spendResult] = await Promise.all([
+  const [t, incomeResult, spendResult, assets, manuals, prices, fx] = await Promise.all([
     getTranslations("Home"),
     db
       .select({
@@ -77,6 +93,24 @@ export default async function OverviewPage({ searchParams }: OverviewPageProps) 
              AND bl.manual_actual IS NULL)
       )::text AS total
     `),
+    db
+      .select({
+        symbol: assetHoldings.symbol,
+        source: assetHoldings.quoteSource,
+        units: assetHoldings.units,
+        currency: assetHoldings.quoteCurrency,
+      })
+      .from(assetHoldings)
+      .where(eq(assetHoldings.userId, userId)),
+    db
+      .select({ amount: manualHoldings.amount, currency: manualHoldings.currency })
+      .from(manualHoldings)
+      .where(eq(manualHoldings.userId, userId)),
+    db.select().from(assetPrices),
+    db
+      .select()
+      .from(currencyRates)
+      .where(sql`${currencyRates.base} = 'USD' AND ${currencyRates.quote} = 'THB'`),
   ]);
 
   const [incomeRow] = incomeResult;
@@ -89,6 +123,26 @@ export default async function OverviewPage({ searchParams }: OverviewPageProps) 
   const greeting = t("greeting", {
     name: session.user.name ?? session.user.username ?? "",
   });
+
+  // Compute portfolio total in USD via cached prices + FX rate.
+  const usdThbRate = fx[0] ? new Decimal(fx[0].rate) : null;
+  const priceMap = new Map<string, { price: Decimal; currency: Currency }>();
+  for (const p of prices) {
+    priceMap.set(`${p.source}::${p.symbol}`, {
+      price: new Decimal(p.price),
+      currency: (p.currency === "THB" ? "THB" : "USD") as Currency,
+    });
+  }
+  const assetValues = assets.map((a) => {
+    const cached = priceMap.get(`${a.source}::${a.symbol}`);
+    const price = cached?.price ?? new Decimal(0);
+    const currency: Currency = cached?.currency ?? (a.currency === "THB" ? "THB" : "USD");
+    return convertToUsdThb(new Decimal(a.units).times(price), currency, usdThbRate);
+  });
+  const manualValues = manuals.map((m) =>
+    convertToUsdThb(new Decimal(m.amount), m.currency === "THB" ? "THB" : "USD", usdThbRate),
+  );
+  const portfolioValue = sumValues([...assetValues, ...manualValues]);
 
   return (
     <AppShell>
@@ -114,7 +168,7 @@ export default async function OverviewPage({ searchParams }: OverviewPageProps) 
         </div>
 
         {/* Stat cards */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard
             label={`${year} Income`}
             value={fmt(income)}
@@ -137,12 +191,19 @@ export default async function OverviewPage({ searchParams }: OverviewPageProps) 
             valueColor={net.isNegative() ? "text-destructive" : "text-emerald-600"}
             trend={null}
           />
+          <StatCard
+            label="Portfolio (USD)"
+            value={fmtUSD(portfolioValue.usd)}
+            icon={<TrendingUp className="h-4 w-4" />}
+            iconBg="bg-blue-100 text-blue-600"
+            trend={portfolioValue.usd.isZero() ? null : "up"}
+          />
         </div>
 
         {/* Quick navigation */}
         <div>
           <h2 className="mb-4 text-base font-semibold">Quick Access</h2>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {QUICK_NAV.map((item) => {
               const Icon = item.icon;
               return (
@@ -217,6 +278,15 @@ function fmt(d: Decimal): string {
   return new Intl.NumberFormat("th-TH", {
     style: "currency",
     currency: "THB",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(d.toNumber());
+}
+
+function fmtUSD(d: Decimal): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(d.toNumber());
