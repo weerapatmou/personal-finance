@@ -1,26 +1,26 @@
 import { auth } from "@/lib/auth";
-import { searchSymbols, YahooRateLimitError } from "@/lib/prices/yahoo";
+import { searchSymbols } from "@/lib/prices/tradingview";
 import { searchCoins } from "@/lib/prices/coingecko";
 
 // Unified search proxy. The wizard's autocomplete hits this single endpoint
 // and routes by category — keeps the client agnostic of the upstream API.
 //
-// Auth-gated so random callers can't drain Yahoo/CoinGecko quota for us.
+// Auth-gated so random callers can't drain quota for us.
 
 export type AssetSearchHit =
   | {
       kind: "stock";
-      symbol: string;        // Yahoo ticker (e.g. "AAPL")
+      symbol: string; // ticker (e.g. "AAPL"), already stripped of any markup
       name: string;
       exchange: string;
-      currency: string;      // native quote currency
-      type: string;          // EQUITY/ETF/MUTUALFUND
+      currency: string;
+      type: string; // EQUITY | ETF
     }
   | {
       kind: "crypto";
-      symbol: string;        // CoinGecko id (e.g. "bitcoin")
+      symbol: string; // CoinGecko id (e.g. "bitcoin")
       name: string;
-      ticker: string;        // ticker like "btc" — for display only
+      ticker: string; // ticker like "btc" — for display only
       thumb: string | null;
     };
 
@@ -34,23 +34,16 @@ export async function GET(req: Request) {
   if (q.length < 1) return Response.json([]);
 
   if (category === "stock") {
-    try {
-      const results = await searchSymbols(q);
-      const hits: AssetSearchHit[] = results.map((r) => ({
-        kind: "stock",
-        symbol: r.symbol,
-        name: r.name,
-        exchange: r.exchange,
-        currency: r.currency,
-        type: r.type,
-      }));
-      return Response.json(hits);
-    } catch (e) {
-      if (e instanceof YahooRateLimitError) {
-        return Response.json({ error: e.message }, { status: 429 });
-      }
-      throw e;
-    }
+    const results = await searchSymbols(q);
+    const hits: AssetSearchHit[] = results.map((r) => ({
+      kind: "stock",
+      symbol: r.symbol,
+      name: r.name,
+      exchange: r.exchange,
+      currency: r.currency,
+      type: r.type,
+    }));
+    return Response.json(hits);
   }
 
   if (category === "crypto") {
