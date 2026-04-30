@@ -164,7 +164,7 @@ export default async function PortfolioDashboard() {
 
         {/* Top stat cards */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <StatCard label="Total Asset (USD)" value={fmtUSD(grand.usd)} sub={fmtTHB(grand.thb)} highlight />
+          <StatCard label="Total Asset (THB)" value={fmtTHB(grand.thb)} sub={fmtUSD(grand.usd)} highlight />
           <StatCard
             label="USD / THB"
             value={usdThbRate ? usdThbRate.toFixed(4) : "—"}
