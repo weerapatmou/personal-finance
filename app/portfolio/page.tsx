@@ -45,7 +45,18 @@ export default async function PortfolioDashboard() {
   // Look up USD/THB rate; null means no FX yet (user must click Refresh)
   const usdThbRow = fx.find((r) => r.quote === "THB");
   const usdThbRate = usdThbRow ? new Decimal(usdThbRow.rate) : null;
-  const fxAsOf = usdThbRow ? toIsoDate(usdThbRow.fetchedAt) : null;
+  const fxAsOf = usdThbRow ? usdThbRow.fetchedAt : null;
+
+  // Most-recent fetch time across all prices + FX. Shown next to the
+  // Refresh button so the user knows whether numbers are fresh.
+  const allTimestamps: Date[] = [
+    ...prices.map((p) => p.fetchedAt),
+    ...fx.map((r) => r.fetchedAt),
+  ];
+  const lastRefreshedAt =
+    allTimestamps.length > 0
+      ? new Date(Math.max(...allTimestamps.map((d) => d.getTime())))
+      : null;
 
   const priceKey = (symbol: string, source: string) => `${source}::${symbol}`;
   const priceMap = new Map<string, { price: Decimal; currency: Currency; asOf: Date }>();
@@ -151,7 +162,14 @@ export default async function PortfolioDashboard() {
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <RefreshPricesButton />
+              <div className="flex flex-col items-end gap-1">
+                <RefreshPricesButton />
+                <p className="text-[11px] text-muted-foreground">
+                  {lastRefreshedAt
+                    ? `Updated ${formatRelative(lastRefreshedAt)}`
+                    : "Never refreshed"}
+                </p>
+              </div>
               <Link
                 href="/portfolio/new"
                 className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
@@ -169,7 +187,7 @@ export default async function PortfolioDashboard() {
           <StatCard
             label="USD / THB"
             value={usdThbRate ? usdThbRate.toFixed(4) : "—"}
-            sub={fxAsOf ? `as of ${fxAsOf}` : "no FX yet — click Refresh"}
+            sub={fxAsOf ? `as of ${formatTimestamp(fxAsOf)}` : "no FX yet — click Refresh"}
           />
           <StatCard
             label="Holdings"
@@ -350,8 +368,28 @@ function fmtUSD(d: Decimal): string {
   }).format(d.toNumber());
 }
 
-function toIsoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
+function formatTimestamp(d: Date): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Bangkok",
+  }).format(d);
+}
+
+/** "12 minutes ago" / "3 hours ago" / "2 days ago" — short relative form. */
+function formatRelative(d: Date): string {
+  const diffMs = Date.now() - d.getTime();
+  const sec = Math.floor(diffMs / 1000);
+  if (sec < 60) return "just now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} minute${min === 1 ? "" : "s"} ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} hour${hr === 1 ? "" : "s"} ago`;
+  const day = Math.floor(hr / 24);
+  return `${day} day${day === 1 ? "" : "s"} ago`;
 }
 
 function labelFor(cat: string): string {

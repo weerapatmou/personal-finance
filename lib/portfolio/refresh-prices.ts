@@ -5,9 +5,10 @@
 
 import { db } from "@/db";
 import { assetHoldings, assetPrices, currencyRates } from "@/db/schema";
-import { fetchSpot as yahooSpot, fetchUsdThbRate } from "@/lib/prices/yahoo";
+import { fetchStockSpot } from "@/lib/prices/stooq";
 import { fetchSpot as coingeckoSpot } from "@/lib/prices/coingecko";
 import { fetchTodayGold } from "@/lib/prices/goldtraders";
+import { fetchFxRate } from "@/lib/prices/erapi";
 import { eq } from "drizzle-orm";
 import type { AssetQuoteSource } from "@/db/schema";
 
@@ -41,10 +42,13 @@ export async function refreshPricesForSymbols(jobs: SymbolJob[]): Promise<Refres
       let price: number | null = null;
       let currency = "USD";
       if (source === "YAHOO") {
-        const s = await yahooSpot(symbol);
+        // Symbols stored as bare Yahoo tickers (e.g. "QQQM"); Stooq wants
+        // ".US" suffix — fetchStockSpot handles that mapping.
+        const s = await fetchStockSpot(symbol);
         if (s) {
           price = s.price;
-          currency = s.currency;
+          // Stooq US data is always USD-quoted.
+          currency = "USD";
         }
       } else if (source === "COINGECKO") {
         const s = await coingeckoSpot(symbol);
@@ -80,14 +84,14 @@ export async function refreshPricesForSymbols(jobs: SymbolJob[]): Promise<Refres
 
   // Always refresh USD/THB — the dashboard needs it for every USD holding.
   try {
-    const usdThb = await fetchUsdThbRate();
-    if (usdThb !== null) {
+    const fx = await fetchFxRate("USD", "THB");
+    if (fx) {
       await db
         .insert(currencyRates)
-        .values({ base: "USD", quote: "THB", rate: String(usdThb) })
+        .values({ base: "USD", quote: "THB", rate: String(fx.rate) })
         .onConflictDoUpdate({
           target: [currencyRates.base, currencyRates.quote],
-          set: { rate: String(usdThb), fetchedAt: new Date() },
+          set: { rate: String(fx.rate), fetchedAt: new Date() },
         });
       summary.fxUpdated++;
     } else {

@@ -1,12 +1,28 @@
-// Scraper for goldtraders.or.th. The site publishes Thai gold-bar spot prices
-// (96.5% purity, baht-weight) on its homepage as a small HTML table.
+// Thai gold price (per baht weight, 99.9% purity, in THB).
 //
-// MTS-GOLD 99.9% is slightly different — the standard purity conversion is
-// 99.9 / 96.5 ≈ 1.0352. This module fetches the 96.5% bar price and applies
-// the conversion before returning, so callers store a single canonical value
-// per day.
+// HISTORY: This file used to scrape goldtraders.or.th's HTML homepage.
+// In 2026 they moved to a Next.js SPA that loads prices client-side via
+// JS, so the homepage HTML no longer contains the price table. Rather
+// than reverse-engineer the new app, we compute spot value from the
+// international gold price and the live FX rate. The displayed value is
+// the metal's intrinsic worth — Thai gold dealers add a small premium
+// (~200–500 THB / baht weight) on top, but for portfolio tracking the
+// spot value is what matters.
+//
+// Formula:
+//   1 troy oz   = 31.1035 g
+//   1 baht weight (Thai standard) = 15.244 g
+//   So 1 baht weight of 99.9% gold ≈ 15.244 × 0.999 / 31.1035 troy oz
+//                                  ≈ 0.48962 troy oz
+//   THB per baht weight = XAU_USD_per_oz × 0.48962 × USD_THB
 
-const PURITY_FACTOR_996_TO_999 = 99.9 / 96.5; // ≈ 1.03523316
+import { fetchGoldSpotUsd } from "./stooq";
+import { fetchFxRate } from "./erapi";
+
+const BAHT_WEIGHT_G = 15.244;
+const TROY_OZ_G = 31.1035;
+const PURITY_999 = 0.999;
+const BAHT_WEIGHT_PER_OZ = (BAHT_WEIGHT_G * PURITY_999) / TROY_OZ_G; // ≈ 0.48962
 
 export type GoldPrice = {
   date: string; // ISO yyyy-mm-dd
@@ -14,70 +30,16 @@ export type GoldPrice = {
   source: string;
 };
 
-export class GoldtradersFetchError extends Error {}
-
-const GOLDTRADERS_URL = "https://www.goldtraders.or.th/";
-
-/**
- * Fetch today's MTS-GOLD-99.9% spot price from goldtraders.or.th.
- *
- * Returns `null` on transient HTTP failures so callers can keep yesterday's
- * price (per SPEC §5.3 stale-data semantics) without throwing the cron route.
- */
 export async function fetchTodayGold(): Promise<GoldPrice | null> {
-  let html: string;
-  try {
-    const res = await fetch(GOLDTRADERS_URL, {
-      headers: { "User-Agent": "finance-app/1.0 (+personal use)" },
-      // 8s timeout; never hold the cron hostage.
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok) return null;
-    html = await res.text();
-  } catch {
-    return null;
-  }
-
-  const sellPrice = parseSell965BarPrice(html);
-  if (sellPrice == null) return null;
-
+  const [xau, fx] = await Promise.all([
+    fetchGoldSpotUsd(),
+    fetchFxRate("USD", "THB"),
+  ]);
+  if (!xau || !fx) return null;
+  const thbPerBahtWeight = xau.price * BAHT_WEIGHT_PER_OZ * fx.rate;
   return {
     date: new Date().toISOString().slice(0, 10),
-    bahtWeight999PriceTHB: Math.round(sellPrice * PURITY_FACTOR_996_TO_999 * 100) / 100,
-    source: "goldtraders.or.th",
+    bahtWeight999PriceTHB: Math.round(thbPerBahtWeight * 100) / 100,
+    source: "stooq+erapi",
   };
-}
-
-/**
- * Extracts the 96.5% gold-bar SELL price (per baht weight) from the
- * goldtraders.or.th homepage HTML. Exported so the parser can be unit-tested
- * against a saved fixture without hitting the live site.
- */
-export function parseSell965BarPrice(html: string): number | null {
-  // The page has a row that, when stripped of HTML, contains
-  // "ทองคำแท่ง 96.5%" followed by buy/sell prices.
-  // Strategy: find that label, advance past the "96.5%" tail, then pull the
-  // next two numeric tokens (buy then sell). The "96.5" inside the label is
-  // skipped so it doesn't get counted as a price.
-  const labelMatch = html.match(/ทองคำแท่ง[^<]*?96\.5\s*%?/);
-  if (!labelMatch || labelMatch.index === undefined) return null;
-
-  const start = labelMatch.index + labelMatch[0].length;
-  const after = html.slice(start);
-
-  // Match numbers that look like gold prices: ≥ 4 digits or comma-grouped.
-  // This excludes the leftover "96.5" if it bled past the label and any
-  // small integers in surrounding markup.
-  const numbers = [
-    ...after.matchAll(
-      /([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?|[0-9]{4,}(?:\.[0-9]+)?)/g,
-    ),
-  ];
-  if (numbers.length < 2) return null;
-
-  // Conventional layout: [buy, sell] in the next two cells.
-  const sellRaw = numbers[1]![1]!.replace(/,/g, "");
-  const sell = Number(sellRaw);
-  if (!Number.isFinite(sell) || sell <= 0) return null;
-  return sell;
 }

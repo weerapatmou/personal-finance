@@ -1,16 +1,13 @@
-// Yahoo Finance wrapper for stock/ETF search and spot prices.
+// Yahoo Finance wrapper — symbol SEARCH only.
 //
-// We call Yahoo's public endpoints directly via fetch instead of using
-// `yahoo-finance2`. The library performs an upfront "crumb" cookie handshake
-// against the Yahoo consent page that's flaky in serverless environments
-// (returns 401 ~50% of the time, silently). The endpoints below don't need
-// a crumb — they're the same ones Yahoo's own web UI calls.
-//
-//   v1/finance/search       — symbol search, public, no crumb
-//   v8/finance/chart/{sym}  — current price + meta, public, no crumb
+// We used to also fetch spot prices and FX rates here, but Yahoo's
+// query1/query2 endpoints aggressively rate-limit our IP after even
+// modest use. Spot prices now come from Stooq (lib/prices/stooq.ts) and
+// FX rates from open.er-api.com (lib/prices/erapi.ts) — both no-key,
+// no-crumb, and dramatically more tolerant. Yahoo's value to us now is
+// just the rich symbol-search index.
 
 const SEARCH_URL = "https://query2.finance.yahoo.com/v1/finance/search";
-const CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart";
 const TIMEOUT_MS = 8000;
 
 // Yahoo blocks default fetch user-agents; pretend to be a browser.
@@ -26,12 +23,6 @@ export type YahooSearchResult = {
   exchange: string;
   currency: string;
   type: string; // EQUITY, ETF, MUTUALFUND, INDEX, etc.
-};
-
-export type YahooSpot = {
-  price: number;
-  currency: string;
-  asOf: Date;
 };
 
 /** Distinguishes "Yahoo said no" from "transport failed" so callers can react. */
@@ -118,47 +109,3 @@ export async function searchSymbols(query: string): Promise<YahooSearchResult[]>
   return results;
 }
 
-/**
- * Fetch current spot price via the chart endpoint's `meta` block.
- * Returns null on any failure so callers degrade gracefully.
- */
-export async function fetchSpot(symbol: string): Promise<YahooSpot | null> {
-  if (!symbol) return null;
-
-  type Raw = {
-    chart?: {
-      result?: Array<{
-        meta?: {
-          regularMarketPrice?: number;
-          chartPreviousClose?: number;
-          previousClose?: number;
-          currency?: string;
-          regularMarketTime?: number;
-        };
-      }>;
-      error?: unknown;
-    };
-  };
-
-  const url = `${CHART_URL}/${encodeURIComponent(symbol)}?interval=1d&range=1d`;
-  const data = await jsonFetch<Raw>(url);
-  const meta = data?.chart?.result?.[0]?.meta;
-  if (!meta) return null;
-
-  const price =
-    meta.regularMarketPrice ?? meta.chartPreviousClose ?? meta.previousClose ?? null;
-  if (price == null || !Number.isFinite(price)) return null;
-
-  const asOf =
-    typeof meta.regularMarketTime === "number"
-      ? new Date(meta.regularMarketTime * 1000)
-      : new Date();
-
-  return { price, currency: meta.currency ?? "USD", asOf };
-}
-
-/** USD/THB rate via Yahoo's THB=X FX symbol. */
-export async function fetchUsdThbRate(): Promise<number | null> {
-  const spot = await fetchSpot("THB=X");
-  return spot?.price ?? null;
-}

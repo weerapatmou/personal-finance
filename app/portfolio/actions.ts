@@ -6,7 +6,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
-import { fetchSpot as yahooSpot } from "@/lib/prices/yahoo";
+import { fetchStockSpot } from "@/lib/prices/stooq";
 import { fetchSpot as coingeckoSpot } from "@/lib/prices/coingecko";
 import { fetchTodayGold } from "@/lib/prices/goldtraders";
 import { refreshPricesForUser } from "@/lib/portfolio/refresh-prices";
@@ -75,10 +75,10 @@ export async function addAssetUnits(input: unknown) {
     let price: number | null = null;
     let priceCurrency = data.currency;
     if (data.source === "YAHOO") {
-      const s = await yahooSpot(data.symbol);
+      const s = await fetchStockSpot(data.symbol);
       if (s) {
         price = s.price;
-        priceCurrency = s.currency === "THB" ? "THB" : "USD";
+        priceCurrency = "USD"; // Stooq US data is always USD-quoted
       }
     } else if (data.source === "COINGECKO") {
       const s = await coingeckoSpot(data.symbol);
