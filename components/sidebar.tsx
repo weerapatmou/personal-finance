@@ -12,6 +12,7 @@ import {
   Menu,
   X,
   Wallet,
+  Bitcoin,
 } from "lucide-react";
 
 type NavItem = {
@@ -26,6 +27,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/months", label: "Months", icon: Calendar },
   { href: "/analytics", label: "Analytics", icon: BarChart2 },
   { href: "/portfolio", label: "Portfolio", icon: TrendingUp },
+  { href: "/dca", label: "DCA", icon: Bitcoin },
 ];
 
 interface SidebarProps {

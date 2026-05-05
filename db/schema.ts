@@ -423,6 +423,57 @@ export const currencyRates = pgTable(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 7b. DCA tracker (per-asset cost-averaging ledger)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// One row per DCA buy. Currency-agnostic: each row carries its own fiat
+// currency. `assetSymbol`/`assetSource` pin which row in `asset_prices` is
+// used as the live mark when the dashboard renders — typically the user's
+// existing BTC holding (symbol "bitcoin", source COINGECKO).
+export const dcaEntries = pgTable(
+  "dca_entries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    assetSymbol: varchar("asset_symbol", { length: 64 }).notNull().default("bitcoin"),
+    assetSource: assetQuoteSourceEnum("asset_source").notNull().default("COINGECKO"),
+    date: date("date").notNull(),
+    fiatAmount: numeric("fiat_amount", { precision: 18, scale: 4 }).notNull(),
+    fiatCurrency: varchar("fiat_currency", { length: 3 }).notNull(),
+    units: numeric("units", { precision: 28, scale: 10 }).notNull(),
+    unitPrice: numeric("unit_price", { precision: 18, scale: 4 }).notNull(),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userDateUniq: uniqueIndex("dca_entries_user_asset_date_idx").on(
+      t.userId,
+      t.assetSymbol,
+      t.assetSource,
+      t.date,
+    ),
+    userIdx: index("dca_entries_user_id_idx").on(t.userId),
+  }),
+);
+
+// One row per user. Holds DCA-tab-only UI prefs and goal targets.
+export const dcaSettings = pgTable("dca_settings", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  theme: varchar("theme", { length: 8 }).notNull().default("light"),
+  accent: varchar("accent", { length: 32 }).notNull().default("orange"),
+  graphRange: varchar("graph_range", { length: 8 }).notNull().default("30D"),
+  goalFiat: numeric("goal_fiat", { precision: 18, scale: 4 }),
+  goalFiatCurrency: varchar("goal_fiat_currency", { length: 3 }),
+  goalUnits: numeric("goal_units", { precision: 28, scale: 10 }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 8. Backups
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -534,6 +585,10 @@ export type ManualHolding = typeof manualHoldings.$inferSelect;
 export type NewManualHolding = typeof manualHoldings.$inferInsert;
 export type AssetPriceRow = typeof assetPrices.$inferSelect;
 export type CurrencyRateRow = typeof currencyRates.$inferSelect;
+export type DcaEntry = typeof dcaEntries.$inferSelect;
+export type NewDcaEntry = typeof dcaEntries.$inferInsert;
+export type DcaSettingsRow = typeof dcaSettings.$inferSelect;
+export type NewDcaSettings = typeof dcaSettings.$inferInsert;
 export type AssetCategory = (typeof assetCategoryEnum.enumValues)[number];
 export type ManualCategory = (typeof manualCategoryEnum.enumValues)[number];
 export type AssetQuoteSource = (typeof assetQuoteSourceEnum.enumValues)[number];

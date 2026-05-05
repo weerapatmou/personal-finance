@@ -64,6 +64,13 @@
       "when": 1777455000000,
       "tag": "0008_portfolio_redesign",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1777456000000,
+      "tag": "0009_dca_tracker",
+      "breakpoints": true
     }
   ]
 }

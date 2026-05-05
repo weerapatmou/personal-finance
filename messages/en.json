@@ -12,5 +12,20 @@
   },
   "Home": {
     "greeting": "Hello, {name}"
+  },
+  "Dca": {
+    "title": "DCA Tracker",
+    "addBuy": "Add buy",
+    "theme": "Theme",
+    "fiatGoal": "Fiat goal",
+    "unitsGoal": "Units goal",
+    "totalSpent": "Total spent",
+    "totalUnits": "Total units",
+    "days": "Days",
+    "maxDrawdown": "Max drawdown",
+    "bestEntry": "Best entry",
+    "worstEntry": "Worst entry",
+    "noBuys": "No buys yet. Click Add buy to start.",
+    "setGoal": "set goal"
   }
 }
