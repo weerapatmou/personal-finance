@@ -71,6 +71,13 @@
       "when": 1777456000000,
       "tag": "0009_dca_tracker",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1777457000000,
+      "tag": "0010_enable_rls",
+      "breakpoints": true
     }
   ]
 }
